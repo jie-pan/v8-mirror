@@ -2989,9 +2989,10 @@ void PipelineImpl::AllocateRegisters(const RegisterConfiguration* config,
   }
 
   if (info()->trace_turbo_json_enabled() && !data->MayHaveUnverifiableGraph()) {
-    TurboCfgFile tcf(isolate());
-    tcf << AsC1VRegisterAllocationData("CodeGen",
-                                       data->register_allocation_data());
+    //panjie workaround
+    //TurboCfgFile tcf(isolate());
+    //tcf << AsC1VRegisterAllocationData("CodeGen",
+                                       //data->register_allocation_data());
   }
 
   data->DeleteRegisterAllocationZone();
