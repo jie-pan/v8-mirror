@@ -201,7 +201,7 @@ struct V8_EXPORT_PRIVATE WasmModule {
   WireBytesRef name = {0, 0};
   std::vector<FunctionSig*> signatures;  // by signature index
   std::vector<uint32_t> signature_ids;   // by signature index
-  std::vector<WasmFunction> functions;
+  mutable std::vector<WasmFunction> functions;//panjie
   std::vector<WasmDataSegment> data_segments;
   std::vector<WasmTable> tables;
   std::vector<WasmImport> import_table;

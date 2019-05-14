@@ -6417,9 +6417,9 @@ bool BuildGraphForWasmFunction(AccountingAllocator* allocator,
   {
     auto* func =
         &env->module
-             ->functions[wasm_unit_->func_index_];  // struct WasmFunction
+             ->functions[func_index];  // struct WasmFunction
     func->has_simd = true;
-    PrintF("panjie wasm function #%d has simd\n", wasm_unit_->func_index_);
+    PrintF("panjie wasm function #%d has simd\n", func_index);
   }
 
   if (func_index >= FLAG_trace_wasm_ast_start &&
