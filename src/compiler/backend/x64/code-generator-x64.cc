@@ -2323,7 +2323,7 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleArchInstruction(
     }
     case kX64F32x4Add: {
       DCHECK_EQ(i.OutputSimd128Register(), i.InputSimd128Register(0));
-      __ addps(i.OutputSimd128Register(), i.InputSimd128Register(1));
+      __ Addps(i.OutputSimd128Register(), i.InputSimd128Register(1));
       break;
     }
     case kX64F32x4AddHoriz: {
