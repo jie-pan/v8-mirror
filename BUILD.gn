@@ -65,7 +65,7 @@ declare_args() {
   v8_embedder_string = ""
 
   # Sets -dENABLE_DISASSEMBLER.
-  v8_enable_disassembler = ""
+  v8_enable_disassembler = true
 
   # Sets the number of internal fields on promise objects.
   v8_promise_internal_field_count = 0
