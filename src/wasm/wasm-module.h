@@ -55,6 +55,8 @@ struct WasmFunction {
   WireBytesRef code;     // code of this function.
   bool imported;
   bool exported;
+  bool has_simd; //panjie
+  bool has_loop;
 };
 
 // Static representation of a wasm global variable.

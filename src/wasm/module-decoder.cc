@@ -533,7 +533,9 @@ class ModuleDecoderImpl : public Decoder {
                                         0,              // sig_index
                                         {0, 0},         // code
                                         true,           // imported
-                                        false});        // exported
+                                        false,          // exported
+                                        false,          // has_simd
+                                        false});        // has_loop
           WasmFunction* function = &module_->functions.back();
           function->sig_index =
               consume_sig_index(module_.get(), &function->sig);
