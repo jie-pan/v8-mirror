@@ -328,6 +328,85 @@ class CFGBuilder : public ZoneObject {
     }
   }
 
+    InductionVariable* TryGetInductionVariable(Node* phi) {
+      DCHECK_EQ(2, phi->op()->ValueInputCount());
+      Node* loop = NodeProperties::GetControlInput(phi);
+      DCHECK_EQ(IrOpcode::kLoop, loop->opcode());
+      Node* initial = phi->InputAt(0);
+      Node* arith = phi->InputAt(1);
+      InductionVariable::ArithmeticType arithmeticType;
+      /*
+      if (arith->opcode() == IrOpcode::kJSAdd ||
+          arith->opcode() == IrOpcode::kNumberAdd ||
+          arith->opcode() == IrOpcode::kSpeculativeNumberAdd ||
+          arith->opcode() == IrOpcode::kSpeculativeSafeIntegerAdd) {
+        arithmeticType = InductionVariable::ArithmeticType::kAddition;
+      } else if (arith->opcode() == IrOpcode::kJSSubtract ||
+                 arith->opcode() == IrOpcode::kNumberSubtract ||
+                 arith->opcode() == IrOpcode::kSpeculativeNumberSubtract ||
+                 arith->opcode() == IrOpcode::kSpeculativeSafeIntegerSubtract) {
+        arithmeticType = InductionVariable::ArithmeticType::kSubtraction;
+      } else {
+        return nullptr;
+      }
+      */
+      if (arith->opcode() == IrOpcode::kInt32Add)
+      {
+            arithmeticType = InductionVariable::ArithmeticType::kAddition;
+      }
+      else if(arith->opcode() == IrOpcode::kInt32Sub)
+      {
+            arithmeticType = InductionVariable::ArithmeticType::kSubtraction;
+      }
+      else
+      {
+            return nullptr;
+      }
+
+      // TODO(jarin) Support both sides.
+      Node* input = arith->InputAt(0);
+      /*
+      if (input->opcode() == IrOpcode::kSpeculativeToNumber ||
+          input->opcode() == IrOpcode::kJSToNumber ||
+          input->opcode() == IrOpcode::kJSToNumberConvertBigInt) {
+        input = input->InputAt(0);
+      }
+      */
+      if (input != phi) return nullptr;
+
+      Node* effect_phi = nullptr;
+      for (Node* use : loop->uses()) {
+        if (use->opcode() == IrOpcode::kEffectPhi) {
+          DCHECK_NULL(effect_phi);
+          effect_phi = use;
+        }
+      }
+      if (!effect_phi) return nullptr;
+
+      Node* incr = arith->InputAt(1);
+      TRACE("panjie--- found phi %i, effect_phi %i, arith %i, incr %i, init %i, tpye %i 0add-1sub",
+            phi->id(), effect_phi->id(), arith->id(), incr->id(), initial->id(), arithmeticType);
+      return new (schedule_->zone()) InductionVariable(phi, effect_phi, arith, incr, initial,
+                                           schedule_->zone(), arithmeticType);
+    }
+
+  void DetectInductionVariables(Node* loop) {
+      if (loop->op()->ControlInputCount() != 2) return;
+      TRACE("panjie--- Loop variables for loop %i:", loop->id());
+      for (Edge edge : loop->use_edges()) {
+        if (NodeProperties::IsControlEdge(edge) &&
+            edge.from()->opcode() == IrOpcode::kPhi) {
+          Node* phi = edge.from();
+          InductionVariable* induction_var = TryGetInductionVariable(phi);
+          if (induction_var) {
+            //induction_vars_[phi->id()] = induction_var;
+            TRACE("panjie--- %i", induction_var->phi()->id());
+          }
+        }
+      }
+      TRACE("\n");
+    }
+
   void BuildBlocks(Node* node) {
     switch (node->opcode()) {
       case IrOpcode::kEnd:
@@ -337,6 +416,9 @@ class CFGBuilder : public ZoneObject {
         FixNode(schedule_->start(), node);
         break;
       case IrOpcode::kLoop:
+        BuildBlockForNode(node);
+        DetectInductionVariables(node);
+        break;
       case IrOpcode::kMerge:
         BuildBlockForNode(node);
         break;

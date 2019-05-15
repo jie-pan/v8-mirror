@@ -42,6 +42,7 @@ class InductionVariable : public ZoneObject {
  private:
   friend class LoopVariableOptimizer;
   friend class SpecialRPONumberer;
+  friend class CFGBuilder;
 
   InductionVariable(Node* phi, Node* effect_phi, Node* arith, Node* increment,
                     Node* init_value, Zone* zone, ArithmeticType arithmeticType)
