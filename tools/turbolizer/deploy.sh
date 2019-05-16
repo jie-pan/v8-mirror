@@ -17,6 +17,7 @@ copy *.png $DEST/
 copy *.css $DEST/
 copy index.html $DEST/
 copy info-view.html $DEST/
+copy run_prettify.js  $DEST/
 copy -R build $DEST/
 copy -R img $DEST/
 echo "done!"
