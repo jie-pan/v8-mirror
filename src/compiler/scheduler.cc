@@ -372,7 +372,8 @@ class CFGBuilder : public ZoneObject {
         input = input->InputAt(0);
       }
       */
-      if (input != phi) return nullptr;
+      if (input != phi)
+          return nullptr;
 
       Node* effect_phi = nullptr;
       for (Node* use : loop->uses()) {
@@ -381,17 +382,51 @@ class CFGBuilder : public ZoneObject {
           effect_phi = use;
         }
       }
-      if (!effect_phi) return nullptr;
+      if (!effect_phi)
+          return nullptr;
 
       Node* incr = arith->InputAt(1);
-      TRACE("panjie--- found phi %i, effect_phi %i, arith %i, incr %i, init %i, tpye %i 0add-1sub",
+
+      //panjie
+      for (Node* use : arith->uses())
+      {
+          if (use->opcode() == IrOpcode::kWord32Equal)
+          {
+              if (NodeProperties::IsConstant(use->InputAt(0)) ||
+                      NodeProperties::IsConstant(use->InputAt(1))  )
+              {
+                  Node * iteration_end;
+                  if (NodeProperties::IsConstant(use->InputAt(0)))
+                  {
+                      iteration_end = use->InputAt(0);
+                  }
+                  else
+                  {
+                      iteration_end = use->InputAt(1);
+                  }
+
+                  if (NodeProperties::IsConstant(initial) &&
+                          NodeProperties::IsConstant(incr))
+                  {
+                      TRACE("panjie--- constant %i %i %i\n",  initial->id(), incr->id(), iteration_end->id());
+                  }
+              }
+          }
+      }
+      if (loop->op()->ControlInputCount() != 2)
+      {
+            TRACE("panjie--- can't use avx\n");
+      }
+
+      TRACE("panjie--- found phi %i, effect_phi %i, arith %i, incr %i, init %i, tpye %i 0add 1sub\n",
             phi->id(), effect_phi->id(), arith->id(), incr->id(), initial->id(), arithmeticType);
       return new (schedule_->zone()) InductionVariable(phi, effect_phi, arith, incr, initial,
                                            schedule_->zone(), arithmeticType);
     }
 
   void DetectInductionVariables(Node* loop) {
-      if (loop->op()->ControlInputCount() != 2) return;
+      if (loop->op()->ControlInputCount() != 2)
+          return;
       TRACE("panjie--- Loop variables for loop %i:", loop->id());
       for (Edge edge : loop->use_edges()) {
         if (NodeProperties::IsControlEdge(edge) &&
