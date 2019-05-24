@@ -1,0 +1,13 @@
+
+out.gn/x64.release/d8 --trace-turbo-loop  /home/panjie/web/src/wasmsimdbench/sum.js
+
+gdb --tui  out.gn/x64.release/d8 
+
+
+wasm debug args:
+ --trace-turbo-scheduler  --experimental-wasm-simd  --wasm-num-compilation-tasks=0  --trace-turbo-graph  --trace-turbo  sum_wasm_sse.js 
+
+js debug args:
+--always-opt --trace-turbo-loop --no-turbo-loop-peeling --no-turbo-loop-rotation /home/panjie/web/src/wasmsimdbench/bench_js/sum.js
+
+
