@@ -419,7 +419,7 @@ class CFGBuilder : public ZoneObject {
             TRACE("panjie--- can't use avx\n");
       }
 
-      TRACE("panjie--- found phi %i, effect_phi %i, arith %i, incr %i, init %i, tpye %i 0add 1sub\n",
+      TRACE("panjie--- found phi %i, effect_phi %i, arith %i, incr %i, init %i, type %i 0add 1sub\n",
             phi->id(), effect_phi->id(), arith->id(), incr->id(), initial->id(), arithmeticType);
       return new (schedule_->zone()) InductionVariable(phi, effect_phi, arith, incr, initial,
                                            schedule_->zone(), arithmeticType);
@@ -428,7 +428,7 @@ class CFGBuilder : public ZoneObject {
   void DetectInductionVariables(Node* loop) {
       if (loop->op()->ControlInputCount() != 2)
           return;
-      TRACE("panjie--- Loop variables for loop %i:", loop->id());
+      TRACE("panjie--- Loop variables for loop %i:\n", loop->id());
       for (Edge edge : loop->use_edges()) {
         if (NodeProperties::IsControlEdge(edge) &&
             edge.from()->opcode() == IrOpcode::kPhi) {
