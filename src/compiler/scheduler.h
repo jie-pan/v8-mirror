@@ -23,6 +23,7 @@ class ControlEquivalence;
 class Graph;
 class SpecialRPONumberer;
 
+class LoopTransform;
 
 // Computes a schedule from a graph, placing nodes into basic blocks and
 // ordering the basic blocks in the special RPO order.
@@ -78,6 +79,8 @@ class V8_EXPORT_PRIVATE Scheduler {
   CFGBuilder* control_flow_builder_;     // Builds basic blocks for controls.
   SpecialRPONumberer* special_rpo_;      // Special RPO numbering of blocks.
   ControlEquivalence* equivalence_;      // Control dependence equivalence.
+ //panjie
+  LoopTransform* loop_transformer_;
 
   Scheduler(Zone* zone, Graph* graph, Schedule* schedule, Flags flags,
             size_t node_count_hint_);
@@ -119,6 +122,10 @@ class V8_EXPORT_PRIVATE Scheduler {
 
   // Phase 6: Seal the final schedule.
   void SealFinalSchedule();
+
+  // Phase 7: panjie
+  friend class LoopTransform;
+  void TransformLoop();
 
   void FuseFloatingControl(BasicBlock* block, Node* node);
   void MovePlannedNodes(BasicBlock* from, BasicBlock* to);

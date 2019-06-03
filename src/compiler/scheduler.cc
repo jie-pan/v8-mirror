@@ -63,7 +63,8 @@ Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags) {
   scheduler.ScheduleLate();
 
   scheduler.SealFinalSchedule();
-
+  //panjie
+  scheduler.TransformLoop();
   return schedule;
 }
 
@@ -250,8 +251,7 @@ class CFGBuilder : public ZoneObject {
         control_(zone),
         component_entry_(nullptr),
         component_start_(nullptr),
-        component_end_(nullptr),
-        induction_vars_(zone) {}
+        component_end_(nullptr) {}
 
   // Run the control flow graph construction algorithm by walking the graph
   // backwards from end through control edges, building and connecting the
@@ -329,170 +329,6 @@ class CFGBuilder : public ZoneObject {
     }
   }
 
-    InductionVariable* TryGetInductionVariable(Node* phi) {
-      DCHECK_EQ(2, phi->op()->ValueInputCount());
-      Node* loop = NodeProperties::GetControlInput(phi);
-      DCHECK_EQ(IrOpcode::kLoop, loop->opcode());
-      Node* initial = phi->InputAt(0);
-      Node* arith = phi->InputAt(1);
-      InductionVariable::ArithmeticType arithmeticType;
-      /*
-      if (arith->opcode() == IrOpcode::kJSAdd ||
-          arith->opcode() == IrOpcode::kNumberAdd ||
-          arith->opcode() == IrOpcode::kSpeculativeNumberAdd ||
-          arith->opcode() == IrOpcode::kSpeculativeSafeIntegerAdd) {
-        arithmeticType = InductionVariable::ArithmeticType::kAddition;
-      } else if (arith->opcode() == IrOpcode::kJSSubtract ||
-                 arith->opcode() == IrOpcode::kNumberSubtract ||
-                 arith->opcode() == IrOpcode::kSpeculativeNumberSubtract ||
-                 arith->opcode() == IrOpcode::kSpeculativeSafeIntegerSubtract) {
-        arithmeticType = InductionVariable::ArithmeticType::kSubtraction;
-      } else {
-        return nullptr;
-      }
-      */
-      if (arith->opcode() == IrOpcode::kInt32Add)
-      {
-            arithmeticType = InductionVariable::ArithmeticType::kAddition;
-      }
-      else if(arith->opcode() == IrOpcode::kInt32Sub)
-      {
-            arithmeticType = InductionVariable::ArithmeticType::kSubtraction;
-      }
-      else
-      {
-            return nullptr;
-      }
-
-      // TODO(jarin) Support both sides.
-      Node* input = arith->InputAt(0);
-      /*
-      if (input->opcode() == IrOpcode::kSpeculativeToNumber ||
-          input->opcode() == IrOpcode::kJSToNumber ||
-          input->opcode() == IrOpcode::kJSToNumberConvertBigInt) {
-        input = input->InputAt(0);
-      }
-      */
-      if (input != phi)
-          return nullptr;
-
-      Node* effect_phi = nullptr;
-      for (Node* use : loop->uses()) {
-        if (use->opcode() == IrOpcode::kEffectPhi) {
-          DCHECK_NULL(effect_phi);
-          effect_phi = use;
-        }
-      }
-      if (!effect_phi)
-          return nullptr;
-
-      Node* incr = arith->InputAt(1);
-
-      //panjie
-      for (Node* use : arith->uses())
-      {
-          if (use->opcode() == IrOpcode::kWord32Equal)
-          {
-              if (NodeProperties::IsConstant(use->InputAt(0)) ||
-                      NodeProperties::IsConstant(use->InputAt(1))  )
-              {
-                  Node * iteration_end;
-                  if (NodeProperties::IsConstant(use->InputAt(0)))
-                  {
-                      iteration_end = use->InputAt(0);
-                  }
-                  else
-                  {
-                      iteration_end = use->InputAt(1);
-                  }
-
-                  if (NodeProperties::IsConstant(initial) &&
-                          NodeProperties::IsConstant(incr))
-                  {
-                      TRACE("panjie--- constant %i %i %i\n",  initial->id(), incr->id(), iteration_end->id());
-                  }
-              }
-          }
-      }
-      if (loop->op()->ControlInputCount() != 2)
-      {
-            TRACE("panjie--- can't use avx\n");
-      }
-
-      TRACE("panjie--- found phi %i, effect_phi %i, arith %i, incr %i, init %i, type %i 0add 1sub\n",
-            phi->id(), effect_phi->id(), arith->id(), incr->id(), initial->id(), arithmeticType);
-      return new (schedule_->zone()) InductionVariable(phi, effect_phi, arith, incr, initial,
-                                           schedule_->zone(), arithmeticType);
-    }
-
-  void DetectInductionVariables(Node* loop) {
-      if (loop->op()->ControlInputCount() != 2)
-          return;
-      TRACE("panjie--- Loop variables for loop %i:\n", loop->id());
-      for (Edge edge : loop->use_edges()) {
-        if (NodeProperties::IsControlEdge(edge) &&
-            edge.from()->opcode() == IrOpcode::kPhi) {
-          Node* phi = edge.from();
-          InductionVariable* induction_var = TryGetInductionVariable(phi);
-          if (induction_var) {
-            induction_vars_[phi->id()] = induction_var;
-            TRACE("panjie--- %i", induction_var->phi()->id());
-          }
-        }
-      }
-      TRACE("\n");
-    }
-    void GetLoopCount(Node* loop) {
-      if (loop->op()->ControlInputCount() != 2)
-          return;
-
-      TRACE("panjie--- Loop Count for loop %i:\n", loop->id());
-      int max = NodeProperties::PastControlIndex(loop);
-      for (int i = NodeProperties::FirstControlIndex(loop); i < max; i++) {
-        Node* input = loop->InputAt(i);
-        if (input->opcode() == IrOpcode::kIfFalse ||
-            input->opcode() == IrOpcode::kIfTrue)
-        {
-            VisitIf(input, true);
-
-        }
-
-        TRACE("\n");
-      }
-    }
-    void VisitIf(Node* node, bool polarity) {
-        Node* branch = node->InputAt(0);
-        Node* cond = branch->InputAt(0);
-        // Normalize to less than comparison.
-        switch (cond->opcode()) {
-        case IrOpcode::kWord32Equal:
-            if (cond->InputAt(0)->opcode() == IrOpcode::kWord32Equal)
-                cond = cond->InputAt(0);
-            break;
-        case IrOpcode::kJSLessThan:
-            break;
-        case IrOpcode::kJSGreaterThan:
-            //AddCmpToLimits(&limits, cond, InductionVariable::kNonStrict, !polarity);
-            break;
-        case IrOpcode::kJSLessThanOrEqual:
-            //AddCmpToLimits(&limits, cond, InductionVariable::kNonStrict, polarity);
-            break;
-        case IrOpcode::kJSGreaterThanOrEqual:
-            //AddCmpToLimits(&limits, cond, InductionVariable::kStrict, !polarity);
-            break;
-        default:
-            break;
-        }
-        Node* left = cond->InputAt(0);
-        Node* right = cond->InputAt(1);
-        for (auto entry : induction_vars_) {
-            InductionVariable* induction_var = entry.second;
-            if (induction_var->arith() == left ||  induction_var->arith() == right)
-            {
-                TRACE("---panjie found main induction_var %i\n", induction_var->phi()->id());
-            }
-        }
-    }
   void BuildBlocks(Node* node) {
     switch (node->opcode()) {
       case IrOpcode::kEnd:
@@ -502,10 +338,6 @@ class CFGBuilder : public ZoneObject {
         FixNode(schedule_->start(), node);
         break;
       case IrOpcode::kLoop:
-        BuildBlockForNode(node);
-        DetectInductionVariables(node);
-        GetLoopCount(node);
-        break;
       case IrOpcode::kMerge:
         BuildBlockForNode(node);
         break;
@@ -775,9 +607,6 @@ class CFGBuilder : public ZoneObject {
   Node* component_entry_;        // Component single-entry node.
   BasicBlock* component_start_;  // Component single-entry block.
   BasicBlock* component_end_;    // Component single-exit block.
-  //panjie
-  ZoneMap<int, InductionVariable*> induction_vars_;
-
 };
 
 
@@ -1310,8 +1139,6 @@ void Scheduler::ComputeSpecialRPONumbering() {
   // Compute the special reverse-post-order for basic blocks.
   special_rpo_ = new (zone_) SpecialRPONumberer(zone_, schedule_);
   special_rpo_->ComputeSpecialRPO();
-  //panjie
-
 }
 
 
@@ -1985,6 +1812,221 @@ void Scheduler::MovePlannedNodes(BasicBlock* from, BasicBlock* to) {
               scheduled_nodes_[to->id().ToSize()]);
   }
 }
+
+
+class LoopTransform: public ZoneObject {
+ public:
+  LoopTransform(Zone* zone, Scheduler* scheduler)
+      : zone_(zone),
+        scheduler_(scheduler),
+        schedule_(scheduler->schedule_),
+        induction_vars_(zone) {}
+
+  void Run() {
+
+      if(!scheduler_->graph_->HasSimd())
+      {
+          return ;
+      }
+      // Mark the inputs of all phis in loop headers as used.
+      BasicBlockVector* blocks = schedule_->rpo_order();
+      for (auto const block : *blocks) {
+          if (!block->IsLoopHeader()) continue;
+          DCHECK_LE(2u, block->PredecessorCount());
+          for (Node* const node : *block) {
+              if (node->opcode() != IrOpcode::kLoop)
+                  continue;
+              DetectInductionVariables(node);
+              GetLoopCount(node);
+          }
+      }
+  }
+   InductionVariable* TryGetInductionVariable(Node* phi) {
+      DCHECK_EQ(2, phi->op()->ValueInputCount());
+      Node* loop = NodeProperties::GetControlInput(phi);
+      DCHECK_EQ(IrOpcode::kLoop, loop->opcode());
+      Node* initial = phi->InputAt(0);
+      Node* arith = phi->InputAt(1);
+      InductionVariable::ArithmeticType arithmeticType;
+      /*
+      if (arith->opcode() == IrOpcode::kJSAdd ||
+          arith->opcode() == IrOpcode::kNumberAdd ||
+          arith->opcode() == IrOpcode::kSpeculativeNumberAdd ||
+          arith->opcode() == IrOpcode::kSpeculativeSafeIntegerAdd) {
+        arithmeticType = InductionVariable::ArithmeticType::kAddition;
+      } else if (arith->opcode() == IrOpcode::kJSSubtract ||
+                 arith->opcode() == IrOpcode::kNumberSubtract ||
+                 arith->opcode() == IrOpcode::kSpeculativeNumberSubtract ||
+                 arith->opcode() == IrOpcode::kSpeculativeSafeIntegerSubtract) {
+        arithmeticType = InductionVariable::ArithmeticType::kSubtraction;
+      } else {
+        return nullptr;
+      }
+      */
+      if (arith->opcode() == IrOpcode::kInt32Add)
+      {
+            arithmeticType = InductionVariable::ArithmeticType::kAddition;
+      }
+      else if(arith->opcode() == IrOpcode::kInt32Sub)
+      {
+            arithmeticType = InductionVariable::ArithmeticType::kSubtraction;
+      }
+      else
+      {
+            return nullptr;
+      }
+
+      // TODO(jarin) Support both sides.
+      Node* input = arith->InputAt(0);
+      /*
+      if (input->opcode() == IrOpcode::kSpeculativeToNumber ||
+          input->opcode() == IrOpcode::kJSToNumber ||
+          input->opcode() == IrOpcode::kJSToNumberConvertBigInt) {
+        input = input->InputAt(0);
+      }
+      */
+      if (input != phi)
+          return nullptr;
+
+      Node* effect_phi = nullptr;
+      for (Node* use : loop->uses()) {
+        if (use->opcode() == IrOpcode::kEffectPhi) {
+          DCHECK_NULL(effect_phi);
+          effect_phi = use;
+        }
+      }
+      if (!effect_phi)
+          return nullptr;
+
+      Node* incr = arith->InputAt(1);
+
+      //panjie
+      for (Node* use : arith->uses())
+      {
+          if (use->opcode() == IrOpcode::kWord32Equal)
+          {
+              if (NodeProperties::IsConstant(use->InputAt(0)) ||
+                      NodeProperties::IsConstant(use->InputAt(1))  )
+              {
+                  Node * iteration_end;
+                  if (NodeProperties::IsConstant(use->InputAt(0)))
+                  {
+                      iteration_end = use->InputAt(0);
+                  }
+                  else
+                  {
+                      iteration_end = use->InputAt(1);
+                  }
+
+                  if (NodeProperties::IsConstant(initial) &&
+                          NodeProperties::IsConstant(incr))
+                  {
+                      TRACE("panjie--- constant %i %i %i\n",  initial->id(), incr->id(), iteration_end->id());
+                  }
+              }
+          }
+      }
+      if (loop->op()->ControlInputCount() != 2)
+      {
+            TRACE("panjie--- can't use avx\n");
+      }
+
+      TRACE("panjie--- found phi %i, effect_phi %i, arith %i, incr %i, init %i, type %i 0add 1sub\n",
+            phi->id(), effect_phi->id(), arith->id(), incr->id(), initial->id(), arithmeticType);
+      return new (schedule_->zone()) InductionVariable(phi, effect_phi, arith, incr, initial,
+                                           schedule_->zone(), arithmeticType);
+    }
+
+  void DetectInductionVariables(Node* loop) {
+      if (loop->op()->ControlInputCount() != 2)
+          return;
+      TRACE("panjie--- Loop variables for loop %i:\n", loop->id());
+      for (Edge edge : loop->use_edges()) {
+        if (NodeProperties::IsControlEdge(edge) &&
+            edge.from()->opcode() == IrOpcode::kPhi) {
+          Node* phi = edge.from();
+          InductionVariable* induction_var = TryGetInductionVariable(phi);
+          if (induction_var) {
+            induction_vars_[phi->id()] = induction_var;
+            TRACE("panjie--- %i", induction_var->phi()->id());
+          }
+        }
+      }
+      TRACE("\n");
+    }
+    void GetLoopCount(Node* loop) {
+      if (loop->op()->ControlInputCount() != 2)
+          return;
+
+      TRACE("panjie--- Loop Count for loop %i:\n", loop->id());
+      int max = NodeProperties::PastControlIndex(loop);
+      for (int i = NodeProperties::FirstControlIndex(loop); i < max; i++) {
+        Node* input = loop->InputAt(i);
+        if (input->opcode() == IrOpcode::kIfFalse ||
+            input->opcode() == IrOpcode::kIfTrue)
+        {
+            VisitIf(input, true);
+
+        }
+
+        TRACE("\n");
+      }
+    }
+    void VisitIf(Node* node, bool polarity) {
+        Node* branch = node->InputAt(0);
+        Node* cond = branch->InputAt(0);
+        // Normalize to less than comparison.
+        switch (cond->opcode()) {
+        case IrOpcode::kWord32Equal:
+            if (cond->InputAt(0)->opcode() == IrOpcode::kWord32Equal)
+                cond = cond->InputAt(0);
+            break;
+        case IrOpcode::kJSLessThan:
+            break;
+        case IrOpcode::kJSGreaterThan:
+            //AddCmpToLimits(&limits, cond, InductionVariable::kNonStrict, !polarity);
+            break;
+        case IrOpcode::kJSLessThanOrEqual:
+            //AddCmpToLimits(&limits, cond, InductionVariable::kNonStrict, polarity);
+            break;
+        case IrOpcode::kJSGreaterThanOrEqual:
+            //AddCmpToLimits(&limits, cond, InductionVariable::kStrict, !polarity);
+            break;
+        default:
+            break;
+        }
+        Node* left = cond->InputAt(0);
+        Node* right = cond->InputAt(1);
+        for (auto entry : induction_vars_) {
+            InductionVariable* induction_var = entry.second;
+            if (induction_var->arith() == left ||  induction_var->arith() == right)
+            {
+                TRACE("---panjie found main induction_var %i\n", induction_var->phi()->id());
+            }
+        }
+    }
+
+private:
+  Zone* zone_;
+  Scheduler* scheduler_;
+  Schedule* schedule_;
+  ZoneMap<int, InductionVariable*> induction_vars_;
+
+};
+
+// -----------------------------------------------------------------------------
+// Phase 7:
+void Scheduler::TransformLoop() {
+  TRACE("--- Loop Transform -------------------------------------------\n");
+
+
+  // Build a control-flow graph for the main control-connected component that
+  // is being spanned by the graph's start and end nodes.
+  loop_transformer_= new (zone_) LoopTransform(zone_, this);
+  loop_transformer_->Run();
+
+}
+
 
 #undef TRACE
 
