@@ -533,9 +533,7 @@ class ModuleDecoderImpl : public Decoder {
                                         0,              // sig_index
                                         {0, 0},         // code
                                         true,           // imported
-                                        false,          // exported
-                                        false,          // has_simd
-                                        false});        // has_loop
+                                        false});        // exported
           WasmFunction* function = &module_->functions.back();
           function->sig_index =
               consume_sig_index(module_.get(), &function->sig);
@@ -625,9 +623,7 @@ class ModuleDecoderImpl : public Decoder {
                                     0,           // sig_index
                                     {0, 0},      // code
                                     false,       // imported
-                                    false,       // exported
-                                    false,       // has_simd
-                                    false});     // has_loop
+                                    false});     // exported
       WasmFunction* function = &module_->functions.back();
       function->sig_index = consume_sig_index(module_.get(), &function->sig);
       if (!ok()) return;

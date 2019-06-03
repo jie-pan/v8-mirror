@@ -6415,10 +6415,7 @@ bool BuildGraphForWasmFunction(AccountingAllocator* allocator,
   //panjie TODO
   if (builder.has_simd())
   {
-    auto* func =
-        &env->module
-             ->functions[func_index];  // struct WasmFunction
-    func->has_simd = true;
+    mcgraph->graph()->SetSimd(true);
     PrintF("panjie wasm function #%d has simd\n", func_index);
   }
 

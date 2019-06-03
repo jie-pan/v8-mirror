@@ -55,8 +55,6 @@ struct WasmFunction {
   WireBytesRef code;     // code of this function.
   bool imported;
   bool exported;
-  bool has_simd; //panjie
-  bool has_loop;
 };
 
 // Static representation of a wasm global variable.
@@ -201,7 +199,7 @@ struct V8_EXPORT_PRIVATE WasmModule {
   WireBytesRef name = {0, 0};
   std::vector<FunctionSig*> signatures;  // by signature index
   std::vector<uint32_t> signature_ids;   // by signature index
-  mutable std::vector<WasmFunction> functions;//panjie
+  std::vector<WasmFunction> functions;
   std::vector<WasmDataSegment> data_segments;
   std::vector<WasmTable> tables;
   std::vector<WasmImport> import_table;

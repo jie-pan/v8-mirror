@@ -89,6 +89,9 @@ class V8_EXPORT_PRIVATE Graph final : public NON_EXPORTED_BASE(ZoneObject) {
   // Very simple print API usable in a debugger.
   void Print() const;
 
+  bool HasSimd() const { return has_simd_; }
+  void SetSimd(bool flag) { has_simd_ = flag;}
+
  private:
   friend class NodeMarkerBase;
 
@@ -100,7 +103,7 @@ class V8_EXPORT_PRIVATE Graph final : public NON_EXPORTED_BASE(ZoneObject) {
   Mark mark_max_;
   NodeId next_node_id_;
   ZoneVector<GraphDecorator*> decorators_;
-
+  bool has_simd_ = false;
   DISALLOW_COPY_AND_ASSIGN(Graph);
 };
 

@@ -3982,7 +3982,7 @@ ControlTransferMap WasmInterpreter::ComputeControlTransfersForTesting(
   // Create some dummy structures, to avoid special-casing the implementation
   // just for testing.
   FunctionSig sig(0, 0, nullptr);
-  WasmFunction function{&sig, 0, 0, {0, 0}, false, false, false, false};
+  WasmFunction function{&sig, 0, 0, {0, 0}, false, false};
   InterpreterCode code{
       &function, BodyLocalDecls(zone), start, end, nullptr, nullptr, nullptr};
 
