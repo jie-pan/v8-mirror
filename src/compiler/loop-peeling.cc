@@ -158,7 +158,7 @@ struct Peeling {
 
 class PeeledIterationImpl : public PeeledIteration {
  public:
-  NodeVector node_pairs_;
+  NodeVector node_pairs_;//use vector to present map, node_pairs_[i] -> node_pairs_[i+1],
   explicit PeeledIterationImpl(Zone* zone) : node_pairs_(zone) {}
 };
 
@@ -179,7 +179,7 @@ bool LoopPeeler::CanPeel(LoopTree::Loop* loop) {
   Node* loop_node = loop_tree_->GetLoopControl(loop);
   for (Node* node : loop_tree_->LoopNodes(loop)) {
     for (Node* use : node->uses()) {
-      if (!loop_tree_->Contains(loop, use)) {
+      if (!loop_tree_->Contains(loop, use)) {//use of nodes outside loop
         bool unmarked_exit;
         switch (node->opcode()) {
           case IrOpcode::kLoopExit:
@@ -306,7 +306,7 @@ PeeledIteration* LoopPeeler::Peel(LoopTree::Loop* loop) {
 void LoopPeeler::PeelInnerLoops(LoopTree::Loop* loop) {
   // If the loop has nested loops, peel inside those.
   if (!loop->children().empty()) {
-    for (LoopTree::Loop* inner_loop : loop->children()) {
+    for (LoopTree::Loop* inner_loop : loop->children()) {//post-order, do nothing for parent node
       PeelInnerLoops(inner_loop);
     }
     return;
@@ -321,7 +321,7 @@ void LoopPeeler::PeelInnerLoops(LoopTree::Loop* loop) {
     PrintF("\n");
   }
 
-  Peel(loop);
+  Peel(loop);//entry
 }
 
 namespace {
@@ -350,7 +350,7 @@ void EliminateLoopExit(Node* node) {
 
 }  // namespace
 
-void LoopPeeler::PeelInnerLoopsOfTree() {
+void LoopPeeler::PeelInnerLoopsOfTree() {//main entry
   for (LoopTree::Loop* loop : loop_tree_->outer_loops()) {
     PeelInnerLoops(loop);
   }
