@@ -116,11 +116,11 @@ struct Peeling {
     if (node_map.Get(node) == 0) return node;
     return pairs->at(node_map.Get(node));
   }
-
+  //size()-1, size(), size()+1
   void Insert(Node* original, Node* copy) {
     node_map.Set(original, 1 + pairs->size());
-    pairs->push_back(original);
-    pairs->push_back(copy);
+    pairs->push_back(original);//size()
+    pairs->push_back(copy);//size()+1
   }
 
   void CopyNodes(Graph* graph, Zone* tmp_zone_, Node* dead, NodeRange nodes,
@@ -136,7 +136,7 @@ struct Peeling {
       for (Node* input : node->inputs()) {
         inputs.push_back(map(input));
       }
-      Node* copy = graph->NewNode(node->op(), node->InputCount(), &inputs[0]);
+      Node* copy = graph->NewNode(node->op(), node->InputCount(), &inputs[0]);//new node
       if (NodeProperties::IsTyped(node)) {
         NodeProperties::SetType(copy, NodeProperties::GetType(node));
       }
@@ -369,7 +369,7 @@ void LoopPeeler::EliminateLoopExits(Graph* graph, Zone* tmp_zone) {
 
     if (node->opcode() == IrOpcode::kLoopExit) {
       Node* control = NodeProperties::GetControlInput(node);
-      EliminateLoopExit(node);
+      EliminateLoopExit(node);//
       if (!visited[control->id()]) {
         visited[control->id()] = true;
         queue.push(control);
