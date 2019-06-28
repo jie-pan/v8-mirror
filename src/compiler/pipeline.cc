@@ -1335,6 +1335,25 @@ struct LoopPeelingPhase {
   }
 };
 
+struct LoopPeelingPhaseWasm {
+  static const char* phase_name() { return "V8.TFLoopPeeling Wasm"; }
+
+  void Run(PipelineData* data, Zone* temp_zone) {
+    /*
+    GraphTrimmer trimmer(temp_zone, data->graph());
+    NodeVector roots(temp_zone);
+    data->jsgraph()->GetCachedNodes(&roots);
+    trimmer.TrimGraph(roots.begin(), roots.end());
+    */
+
+    LoopTree* loop_tree =
+        LoopFinder::BuildLoopTree(data->graph(), temp_zone);
+    LoopPeeler(data->graph(), data->common(), loop_tree, temp_zone,
+               data->source_positions(), data->node_origins())
+        .PeelInnerLoopsOfTree();
+  }
+};
+
 struct LoopExitEliminationPhase {
   static const char* phase_name() { return "V8.TFLoopExitElimination"; }
 
@@ -2516,6 +2535,16 @@ void Pipeline::GenerateCodeForWasmFunction(
   if (data.node_origins()) {
     data.node_origins()->RemoveDecorator();
   }
+
+ //panjie
+
+  if(data.graph()->HasSimd())
+  {
+    pipeline.Run<LoopPeelingPhaseWasm>();
+    pipeline.RunPrintAndVerify(LoopPeelingPhaseWasm::phase_name(), true);
+  }
+
+  //end panjie
 
   pipeline.ComputeScheduledGraph();
 
