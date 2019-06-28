@@ -685,8 +685,12 @@ class SpecialRPONumberer : public ZoneObject {
 
   // Print and verify the special reverse-post-order.
   void PrintAndVerifySpecialRPO() {
-#if DEBUG
-    if (FLAG_trace_turbo_scheduler) PrintRPO();
+#if 1 //DEBUG
+    if (FLAG_trace_turbo_scheduler)
+    {
+        if (schedule_)
+        PrintRPO();
+    }
     VerifySpecialRPO();
 #endif
   }
@@ -1011,7 +1015,7 @@ class SpecialRPONumberer : public ZoneObject {
     }
   }
 
-#if DEBUG
+#if 1  // DEBUG
   void PrintRPO() {
     StdoutStream os;
     os << "RPO with " << loops_.size() << " loops";
