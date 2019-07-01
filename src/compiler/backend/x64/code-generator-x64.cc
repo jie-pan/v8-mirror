@@ -2040,11 +2040,15 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleArchInstruction(
       CpuFeatureScope sse_scope(tasm(), SSSE3);
       EmitOOLTrapIfNeeded(zone(), this, opcode, instr, i, __ pc_offset());
       if (instr->HasOutput()) {
-        __ Movdqu(i.OutputSimd128Register(), i.MemoryOperand());
+        __ movdqu(i.OutputSimd128Register(), i.MemoryOperand());
+        //__ Movdqu(i.OutputSimd128Register(), i.MemoryOperand());
+        //__ movdqa(i.OutputSimd128Register(), i.MemoryOperand());
       } else {
         size_t index = 0;
         Operand operand = i.MemoryOperand(&index);
-        __ Movdqu(operand, i.InputSimd128Register(index));
+        __ movdqu(operand, i.InputSimd128Register(index));
+        //__ Movdqu(operand, i.InputSimd128Register(index));
+        //__ movdqa(operand, i.InputSimd128Register(index));
       }
       break;
     }
