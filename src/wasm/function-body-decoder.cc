@@ -164,7 +164,12 @@ bool PrintRawWasmCode(AccountingAllocator* allocator, const FunctionBody& body,
         "                                                                ";
     os.write(padding, num_whitespaces);
 
-    os << RawOpcodeName(opcode) << ",";
+    WasmOpcode realopcode = opcode;
+    if(opcode == kNumericPrefix || opcode == kAtomicPrefix || opcode == kSimdPrefix)
+    {
+        realopcode = static_cast<WasmOpcode>(opcode << 8 | *(i.pc() + 1));
+    }
+    os << RawOpcodeName(realopcode) << ",";
 
     if (opcode == kExprLoop || opcode == kExprIf || opcode == kExprBlock ||
         opcode == kExprTry) {
@@ -188,7 +193,13 @@ bool PrintRawWasmCode(AccountingAllocator* allocator, const FunctionBody& body,
       }
 #undef CASE_LOCAL_TYPE
     } else {
-      for (unsigned j = 1; j < length; ++j) {
+
+      unsigned j = 1;
+      if(opcode == kNumericPrefix || opcode == kAtomicPrefix || opcode == kSimdPrefix)
+      {
+        j++;
+      }
+      for (; j < length; ++j) {
         os << " 0x" << AsHex(i.pc()[j], 2) << ",";
       }
     }
