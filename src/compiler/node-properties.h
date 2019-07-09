@@ -74,6 +74,10 @@ class V8_EXPORT_PRIVATE NodeProperties final {
   static bool IsPhi(Node* node) {
     return IrOpcode::IsPhiOpcode(node->opcode());
   }
+  static bool IsSIMD(Node* node) {
+    return IrOpcode::IsSIMDOpcode(node->opcode());
+  }
+
 
   // Determines whether exceptions thrown by the given node are handled locally
   // within the graph (i.e. an IfException projection is present). Optionally
