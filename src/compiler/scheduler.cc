@@ -5,6 +5,7 @@
 #include "src/compiler/scheduler.h"
 
 #include <iomanip>
+#include <map>
 
 #include "src/base/adapters.h"
 #include "src/bit-vector.h"
@@ -17,6 +18,8 @@
 #include "src/zone/zone-containers.h"
 
 #include "loop-variable-optimizer.h"
+
+#include "src/compiler/loop-analysis.h"
 
 namespace v8 {
 namespace internal {
@@ -1824,7 +1827,215 @@ class LoopTransform: public ZoneObject {
       : zone_(zone),
         scheduler_(scheduler),
         schedule_(scheduler->schedule_),
-        induction_vars_(zone) {}
+        induction_vars_(zone), loop_tree_(nullptr) {
+      InitSupportedOpcode();
+  }
+
+  void InitSupportedOpcode()
+  {
+      /*
+      supported_opcodes_.insert(IrOpcode::kF32x4Splat);
+      supported_opcodes_.insert(IrOpcode::kF32x4ExtractLane);
+      supported_opcodes_.insert(IrOpcode::kF32x4ReplaceLane);
+      supported_opcodes_.insert(IrOpcode::kF32x4SConvertI32x4);
+      supported_opcodes_.insert(IrOpcode::kF32x4UConvertI32x4);
+      supported_opcodes_.insert(IrOpcode::kF32x4Abs);
+      supported_opcodes_.insert(IrOpcode::kF32x4Neg);
+      supported_opcodes_.insert(IrOpcode::kF32x4RecipApprox);
+      supported_opcodes_.insert(IrOpcode::kF32x4RecipSqrtApprox);
+      */
+      supported_opcodes_.insert(IrOpcode::kF32x4Add);
+      //supported_opcodes_.insert(IrOpcode::kF32x4AddHoriz);
+      supported_opcodes_.insert(IrOpcode::kF32x4Sub);
+      supported_opcodes_.insert(IrOpcode::kF32x4Mul);
+      /*
+      supported_opcodes_.insert(IrOpcode::kF32x4Min);
+      supported_opcodes_.insert(IrOpcode::kF32x4Max);
+      supported_opcodes_.insert(IrOpcode::kF32x4Eq);
+      supported_opcodes_.insert(IrOpcode::kF32x4Ne);
+      supported_opcodes_.insert(IrOpcode::kF32x4Lt);
+      supported_opcodes_.insert(IrOpcode::kF32x4Le);
+      supported_opcodes_.insert(IrOpcode::kF32x4Gt);
+      supported_opcodes_.insert(IrOpcode::kF32x4Ge);
+      */
+      /*
+      supported_opcodes_.insert(IrOpcode::kI32x4Splat);
+      supported_opcodes_.insert(IrOpcode::kI32x4ExtractLane);
+      supported_opcodes_.insert(IrOpcode::kI32x4ReplaceLane);
+      supported_opcodes_.insert(IrOpcode::kI32x4SConvertF32x4);
+      supported_opcodes_.insert(IrOpcode::kI32x4SConvertI16x8Low);
+      supported_opcodes_.insert(IrOpcode::kI32x4SConvertI16x8High);
+      supported_opcodes_.insert(IrOpcode::kI32x4Neg);
+      supported_opcodes_.insert(IrOpcode::kI32x4Shl);
+      supported_opcodes_.insert(IrOpcode::kI32x4ShrS);
+      supported_opcodes_.insert(IrOpcode::kI32x4Add);
+      supported_opcodes_.insert(IrOpcode::kI32x4AddHoriz);
+      supported_opcodes_.insert(IrOpcode::kI32x4Sub);
+      supported_opcodes_.insert(IrOpcode::kI32x4Mul);
+      supported_opcodes_.insert(IrOpcode::kI32x4MinS);
+      supported_opcodes_.insert(IrOpcode::kI32x4MaxS);
+      supported_opcodes_.insert(IrOpcode::kI32x4Eq);
+      supported_opcodes_.insert(IrOpcode::kI32x4Ne);
+      supported_opcodes_.insert(IrOpcode::kI32x4LtS);
+      supported_opcodes_.insert(IrOpcode::kI32x4LeS);
+      supported_opcodes_.insert(IrOpcode::kI32x4GtS);
+      supported_opcodes_.insert(IrOpcode::kI32x4GeS);
+      supported_opcodes_.insert(IrOpcode::kI32x4UConvertF32x4);
+      supported_opcodes_.insert(IrOpcode::kI32x4UConvertI16x8Low);
+      supported_opcodes_.insert(IrOpcode::kI32x4UConvertI16x8High);
+      supported_opcodes_.insert(IrOpcode::kI32x4ShrU);
+      supported_opcodes_.insert(IrOpcode::kI32x4MinU);
+      supported_opcodes_.insert(IrOpcode::kI32x4MaxU);
+      supported_opcodes_.insert(IrOpcode::kI32x4LtU);
+      supported_opcodes_.insert(IrOpcode::kI32x4LeU);
+      supported_opcodes_.insert(IrOpcode::kI32x4GtU);
+      supported_opcodes_.insert(IrOpcode::kI32x4GeU);
+      supported_opcodes_.insert(IrOpcode::kI16x8Splat);
+      supported_opcodes_.insert(IrOpcode::kI16x8ExtractLane);
+      supported_opcodes_.insert(IrOpcode::kI16x8ReplaceLane);
+      supported_opcodes_.insert(IrOpcode::kI16x8SConvertI8x16Low);
+      supported_opcodes_.insert(IrOpcode::kI16x8SConvertI8x16High);
+      supported_opcodes_.insert(IrOpcode::kI16x8Neg);
+      supported_opcodes_.insert(IrOpcode::kI16x8Shl);
+      supported_opcodes_.insert(IrOpcode::kI16x8ShrS);
+      supported_opcodes_.insert(IrOpcode::kI16x8SConvertI32x4);
+      supported_opcodes_.insert(IrOpcode::kI16x8Add);
+      supported_opcodes_.insert(IrOpcode::kI16x8AddSaturateS);
+      supported_opcodes_.insert(IrOpcode::kI16x8AddHoriz);
+      supported_opcodes_.insert(IrOpcode::kI16x8Sub);
+      supported_opcodes_.insert(IrOpcode::kI16x8SubSaturateS);
+      supported_opcodes_.insert(IrOpcode::kI16x8Mul);
+      supported_opcodes_.insert(IrOpcode::kI16x8MinS);
+      supported_opcodes_.insert(IrOpcode::kI16x8MaxS);
+      supported_opcodes_.insert(IrOpcode::kI16x8Eq);
+      supported_opcodes_.insert(IrOpcode::kI16x8Ne);
+      supported_opcodes_.insert(IrOpcode::kI16x8LtS);
+      supported_opcodes_.insert(IrOpcode::kI16x8LeS);
+      supported_opcodes_.insert(IrOpcode::kI16x8GtS);
+      supported_opcodes_.insert(IrOpcode::kI16x8GeS);
+      supported_opcodes_.insert(IrOpcode::kI16x8UConvertI8x16Low);
+      supported_opcodes_.insert(IrOpcode::kI16x8UConvertI8x16High);
+      supported_opcodes_.insert(IrOpcode::kI16x8ShrU);
+      supported_opcodes_.insert(IrOpcode::kI16x8UConvertI32x4);
+      supported_opcodes_.insert(IrOpcode::kI16x8AddSaturateU);
+      supported_opcodes_.insert(IrOpcode::kI16x8SubSaturateU);
+      supported_opcodes_.insert(IrOpcode::kI16x8MinU);
+      supported_opcodes_.insert(IrOpcode::kI16x8MaxU);
+      supported_opcodes_.insert(IrOpcode::kI16x8LtU);
+      supported_opcodes_.insert(IrOpcode::kI16x8LeU);
+      supported_opcodes_.insert(IrOpcode::kI16x8GtU);
+      supported_opcodes_.insert(IrOpcode::kI16x8GeU);
+      supported_opcodes_.insert(IrOpcode::kI8x16Splat);
+      supported_opcodes_.insert(IrOpcode::kI8x16ExtractLane);
+      supported_opcodes_.insert(IrOpcode::kI8x16ReplaceLane);
+      supported_opcodes_.insert(IrOpcode::kI8x16SConvertI16x8);
+      supported_opcodes_.insert(IrOpcode::kI8x16Neg);
+      supported_opcodes_.insert(IrOpcode::kI8x16Shl);
+      supported_opcodes_.insert(IrOpcode::kI8x16ShrS);
+      supported_opcodes_.insert(IrOpcode::kI8x16Add);
+      supported_opcodes_.insert(IrOpcode::kI8x16AddSaturateS);
+      supported_opcodes_.insert(IrOpcode::kI8x16Sub);
+      supported_opcodes_.insert(IrOpcode::kI8x16SubSaturateS);
+      supported_opcodes_.insert(IrOpcode::kI8x16Mul);
+      supported_opcodes_.insert(IrOpcode::kI8x16MinS);
+      supported_opcodes_.insert(IrOpcode::kI8x16MaxS);
+      supported_opcodes_.insert(IrOpcode::kI8x16Eq);
+      supported_opcodes_.insert(IrOpcode::kI8x16Ne);
+      supported_opcodes_.insert(IrOpcode::kI8x16LtS);
+      supported_opcodes_.insert(IrOpcode::kI8x16LeS);
+      supported_opcodes_.insert(IrOpcode::kI8x16GtS);
+      supported_opcodes_.insert(IrOpcode::kI8x16GeS);
+      supported_opcodes_.insert(IrOpcode::kI8x16UConvertI16x8);
+      supported_opcodes_.insert(IrOpcode::kI8x16AddSaturateU);
+      supported_opcodes_.insert(IrOpcode::kI8x16SubSaturateU);
+      supported_opcodes_.insert(IrOpcode::kI8x16ShrU);
+      supported_opcodes_.insert(IrOpcode::kI8x16MinU);
+      supported_opcodes_.insert(IrOpcode::kI8x16MaxU);
+      supported_opcodes_.insert(IrOpcode::kI8x16LtU);
+      supported_opcodes_.insert(IrOpcode::kI8x16LeU);
+      supported_opcodes_.insert(IrOpcode::kI8x16GtU);
+      supported_opcodes_.insert(IrOpcode::kI8x16GeU);
+      supported_opcodes_.insert(IrOpcode::kS128Load);
+      supported_opcodes_.insert(IrOpcode::kS128Store);
+      supported_opcodes_.insert(IrOpcode::kS128Zero);
+      supported_opcodes_.insert(IrOpcode::kS128Not);
+      supported_opcodes_.insert(IrOpcode::kS128And);
+      supported_opcodes_.insert(IrOpcode::kS128Or);
+      supported_opcodes_.insert(IrOpcode::kS128Xor);
+      supported_opcodes_.insert(IrOpcode::kS128Select);
+      supported_opcodes_.insert(IrOpcode::kS8x16Shuffle);
+      supported_opcodes_.insert(IrOpcode::kS1x4AnyTrue);
+      supported_opcodes_.insert(IrOpcode::kS1x4AllTrue);
+      supported_opcodes_.insert(IrOpcode::kS1x8AnyTrue);
+      supported_opcodes_.insert(IrOpcode::kS1x8AllTrue);
+      supported_opcodes_.insert(IrOpcode::kS1x16AnyTrue);
+      supported_opcodes_.insert(IrOpcode::kS1x16AllTrue);
+      */
+
+  }
+  bool HasUnsupportedOpcode(LoopTree::Loop* loop)
+  {
+      for (Node* node : loop_tree_->LoopNodes(loop)) {
+          if(NodeProperties::IsSIMD(node))
+          {
+
+              TRACE("panjie--- found simd node #%d:%s\n", node->id(), node->op()->mnemonic());
+              if (supported_opcodes_.find(node->opcode()) == supported_opcodes_.end())
+              {
+                    TRACE("panjie---unsupported simd node #%d:%s\n", node->id(), node->op()->mnemonic());
+                    return true;
+              }
+          }
+      }
+      //TODO
+      //return false;
+      return true;
+  }
+  bool CanVectorize(LoopTree::Loop* loop)
+  {
+     if(HasUnsupportedOpcode(loop))
+     {
+         return false;
+     }
+
+      return true;
+  }
+  void ReVectorize(LoopTree::Loop* loop)
+  {
+
+  }
+  void ReVectorizeIfPossible(LoopTree::Loop* loop)
+  {
+    Node* loop_node = loop_tree_->GetLoopControl(loop);
+
+    DetectInductionVariables(loop_node);
+    GetLoopCount(loop_node);
+    if(CanVectorize(loop))
+    {
+        ReVectorize(loop);
+    }
+
+  }
+  void VectorizeInnerLoops(LoopTree::Loop* loop) {
+      // If the loop has nested loops, peel inside those.
+      if (!loop->children().empty()) {
+          for (LoopTree::Loop* inner_loop : loop->children()) {//post-order, do nothing for parent node
+              VectorizeInnerLoops(inner_loop);
+          }
+          return;
+      }
+      // Only peel small-enough loops.
+      if (loop->TotalSize() >1000) return;
+      if (FLAG_trace_turbo_loop) {
+          PrintF("panjie Vectorize loop with header: ");
+          for (Node* node : loop_tree_->HeaderNodes(loop)) {
+              PrintF("%i ", node->id());
+          }
+          PrintF("\n");
+      }
+
+      ReVectorizeIfPossible(loop);//entry
+  }
 
   void Run() {
 
@@ -1832,6 +2043,15 @@ class LoopTransform: public ZoneObject {
       {
           return ;
       }
+
+      loop_tree_ =
+        LoopFinder::BuildLoopTree(scheduler_->graph_, zone_);
+      for (LoopTree::Loop* loop : loop_tree_->outer_loops()) {
+        //VectorisableLoop
+        VectorizeInnerLoops(loop);
+      }
+
+      /*
       // Mark the inputs of all phis in loop headers as used.
       BasicBlockVector* blocks = schedule_->rpo_order();
       for (auto const block : *blocks) {
@@ -1844,6 +2064,7 @@ class LoopTransform: public ZoneObject {
               GetLoopCount(node);
           }
       }
+      */
   }
    InductionVariable* TryGetInductionVariable(Node* phi) {
       DCHECK_EQ(2, phi->op()->ValueInputCount());
@@ -2015,7 +2236,8 @@ private:
   Scheduler* scheduler_;
   Schedule* schedule_;
   ZoneMap<int, InductionVariable*> induction_vars_;
-
+  LoopTree* loop_tree_;
+  std::set<IrOpcode::Value> supported_opcodes_;
 };
 
 // -----------------------------------------------------------------------------
