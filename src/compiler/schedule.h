@@ -148,6 +148,8 @@ class V8_EXPORT_PRIVATE BasicBlock final
   int32_t rpo_number() const { return rpo_number_; }
   void set_rpo_number(int32_t rpo_number);
 
+  bool need_convert() const { return need_convert_; }
+  void set_need_convert(bool need_convert) { need_convert_ = need_convert; }
   // Loop membership helpers.
   inline bool IsLoopHeader() const { return loop_end_ != nullptr; }
   bool LoopContains(BasicBlock* block) const;
@@ -179,6 +181,7 @@ class V8_EXPORT_PRIVATE BasicBlock final
   AssemblerDebugInfo debug_info_;
 #endif
   Id id_;
+  bool need_convert_;
 
   DISALLOW_COPY_AND_ASSIGN(BasicBlock);
 };
