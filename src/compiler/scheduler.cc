@@ -1975,9 +1975,11 @@ class LoopTransform: public ZoneObject {
   }
   bool HasUnsupportedOpcode(LoopTree::Loop* loop)
   {
+      bool has_simd = false;
       for (Node* node : loop_tree_->LoopNodes(loop)) {
           if(NodeProperties::IsSIMD(node))
           {
+              has_simd = true;
 
               TRACE("panjie--- found simd node #%d:%s\n", node->id(), node->op()->mnemonic());
               if (supported_opcodes_.find(node->opcode()) == supported_opcodes_.end())
@@ -1987,33 +1989,92 @@ class LoopTransform: public ZoneObject {
               }
           }
       }
-      //TODO
-      //return false;
-      return true;
+      return !has_simd;
   }
+
+  bool HasDependency()
+  {
+
+     return false;
+  }
+  void UpdateInductionStride()
+  {
+
+  }
+
+  //mark for sse-avx convert
+  void MarkBlockCandi(Node* loop_node)
+  {
+      BasicBlock* header;
+
+      // Mark the inputs of all phis in loop headers as used.
+      BasicBlockVector* blocks = schedule_->rpo_order();
+      for (auto const block : *blocks) {
+          if (block->IsLoopHeader())
+          {
+              DCHECK_LE(2u, block->PredecessorCount());
+              /*     for (NodeVector::iterator i = block.begin(); i != block.end(); ++i) {
+              if(*i == loop_node)
+                }
+              */
+
+              for (Node* const node : *block) {
+                  if (node->opcode() == IrOpcode::kLoop && node == loop_node)
+                  {
+
+                      header = block;
+                      TRACE("panjie--- block id:%d for loop node #%d:%s\n", header->rpo_number(), node->id(),
+                            node->op()->mnemonic());
+                      //TODO break
+                      goto setflag;
+                  }
+              }
+          }
+      }
+setflag:
+      for (auto block : *blocks) {
+
+          if(header->LoopContains(block))
+          {
+              TRACE("panjie--- mark block id:%d for loop convert\n", block->rpo_number());
+              block->set_need_convert(true);
+          }
+      }
+  }
+
   bool CanVectorize(LoopTree::Loop* loop)
   {
      if(HasUnsupportedOpcode(loop))
      {
          return false;
      }
-
+     if(HasDependency())
+     {
+         return false;
+     }
+      //TODO
       return true;
   }
+
   void ReVectorize(LoopTree::Loop* loop)
   {
+      Node* loop_node = loop_tree_->GetLoopControl(loop);
 
+      MarkBlockCandi(loop_node);//mark for sse-avx convert
+
+      UpdateInductionStride();
   }
+
   void ReVectorizeIfPossible(LoopTree::Loop* loop)
   {
-    Node* loop_node = loop_tree_->GetLoopControl(loop);
+      Node* loop_node = loop_tree_->GetLoopControl(loop);
 
-    DetectInductionVariables(loop_node);
-    GetLoopCount(loop_node);
-    if(CanVectorize(loop))
-    {
-        ReVectorize(loop);
-    }
+      DetectInductionVariables(loop_node);
+      GetLoopCount(loop_node);
+      if(CanVectorize(loop))
+      {
+          ReVectorize(loop);
+      }
 
   }
   void VectorizeInnerLoops(LoopTree::Loop* loop) {
@@ -2156,7 +2217,7 @@ class LoopTransform: public ZoneObject {
             TRACE("panjie--- can't use avx\n");
       }
 
-      TRACE("panjie--- found phi %i, effect_phi %i, arith %i, incr %i, init %i, type %i 0add 1sub\n",
+      TRACE("panjie--- induction var: phi %i, effect_phi %i, arith %i, incr %i, init %i, type %i 0add 1sub\n",
             phi->id(), effect_phi->id(), arith->id(), incr->id(), initial->id(), arithmeticType);
       return new (schedule_->zone()) InductionVariable(phi, effect_phi, arith, incr, initial,
                                            schedule_->zone(), arithmeticType);
