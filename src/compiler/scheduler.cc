@@ -1997,10 +1997,32 @@ class LoopTransform: public ZoneObject {
 
      return false;
   }
-  void UpdateInductionStride()
-  {
 
+  bool ReductionVariable()
+  {
+      return true;
   }
+
+  bool CanVectorize(LoopTree::Loop* loop)
+  {
+     if(HasUnsupportedOpcode(loop))
+     {
+         return false;
+     }
+     if(HasDependency())
+     {
+         return false;
+     }
+     if(ReductionVariable())
+     {
+         return false;
+     }
+
+      //TODO
+      return true;
+  }
+  //////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////
 
   //mark for sse-avx convert
   void MarkBlockCandi(Node* loop_node)
@@ -2042,18 +2064,10 @@ setflag:
       }
   }
 
-  bool CanVectorize(LoopTree::Loop* loop)
+
+  void UpdateInductionStride()
   {
-     if(HasUnsupportedOpcode(loop))
-     {
-         return false;
-     }
-     if(HasDependency())
-     {
-         return false;
-     }
-      //TODO
-      return true;
+
   }
 
   void ReVectorize(LoopTree::Loop* loop)
@@ -2075,8 +2089,8 @@ setflag:
       {
           ReVectorize(loop);
       }
-
   }
+
   void VectorizeInnerLoops(LoopTree::Loop* loop) {
       // If the loop has nested loops, peel inside those.
       if (!loop->children().empty()) {
@@ -2108,7 +2122,6 @@ setflag:
       loop_tree_ =
         LoopFinder::BuildLoopTree(scheduler_->graph_, zone_);
       for (LoopTree::Loop* loop : loop_tree_->outer_loops()) {
-        //VectorisableLoop
         VectorizeInnerLoops(loop);
       }
 
