@@ -350,7 +350,7 @@ class DisassemblerX64 {
     return vex_byte0_ == VEX3_PREFIX ? (vex_byte2_ & 0x80) != 0 : false;
   }
 
-  bool vex_128() {
+  bool vex_128() const {
     DCHECK(vex_byte0_ == VEX3_PREFIX || vex_byte0_ == VEX2_PREFIX);
     byte checked = vex_byte0_ == VEX3_PREFIX ? vex_byte2_ : vex_byte1_;
     return (checked & 4) == 0;
@@ -423,7 +423,8 @@ class DisassemblerX64 {
   }
 
   const char* NameOfXMMRegister(int reg) const {
-    return converter_.NameOfXMMRegister(reg);
+    bool is_128 = vex_128();
+    return converter_.NameOfXMMRegister(reg, is_128 );//panjie
   }
 
   const char* NameOfAddress(byte* addr) const {
@@ -2843,6 +2844,11 @@ static const char* const xmm_regs[16] = {
   "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"
 };
 
+static const char* const ymm_regs[16] = {
+  "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", "ymm5", "ymm6", "ymm7",
+  "ymm8", "ymm9", "ymm10", "ymm11", "ymm12", "ymm13", "ymm14", "ymm15"
+};
+
 
 const char* NameConverter::NameOfAddress(byte* addr) const {
   v8::internal::SNPrintF(tmp_buffer_, "%p", static_cast<void*>(addr));
@@ -2869,9 +2875,18 @@ const char* NameConverter::NameOfByteCPURegister(int reg) const {
 }
 
 
-const char* NameConverter::NameOfXMMRegister(int reg) const {
+const char* NameConverter::NameOfXMMRegister(int reg, bool vex_128) const {
   if (0 <= reg && reg < 16)
-    return xmm_regs[reg];
+  {
+    if(vex_128)
+    {
+      return xmm_regs[reg];
+    }
+    else
+    {
+      return ymm_regs[reg];
+    }
+  }
   return "noxmmreg";
 }
 
