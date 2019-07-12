@@ -2000,7 +2000,7 @@ class LoopTransform: public ZoneObject {
 
   bool ReductionVariable()
   {
-      return true;
+      return false;
   }
 
   bool CanVectorize(LoopTree::Loop* loop)
