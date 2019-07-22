@@ -189,8 +189,14 @@ bool LoopPeeler::CanPeel(LoopTree::Loop* loop) {
           case IrOpcode::kLoopExitEffect:
             unmarked_exit = (node->InputAt(1)->InputAt(1) != loop_node);
             break;
+          //panjie wasm
+          case IrOpcode::kBranch:
+            unmarked_exit = (use->opcode() != IrOpcode::kIfTrue &&
+                             use->opcode() != IrOpcode::kIfFalse);
+            break;
           default:
-            unmarked_exit = (use->opcode() != IrOpcode::kTerminate);
+            unmarked_exit = (use->opcode() != IrOpcode::kTerminate) &&
+                            (use->opcode() != IrOpcode::kReturn);
         }
         if (unmarked_exit) {
           if (FLAG_trace_turbo_loop) {
@@ -325,7 +331,7 @@ void LoopPeeler::PeelInnerLoops(LoopTree::Loop* loop) {
 }
 
 namespace {
-
+//kill 3 nodes(kLoopExitValue, kLoopExitEffect and kLoopExit)
 void EliminateLoopExit(Node* node) {
   DCHECK_EQ(IrOpcode::kLoopExit, node->opcode());
   // The exit markers take the loop exit as input. We iterate over uses
@@ -367,7 +373,7 @@ void LoopPeeler::EliminateLoopExits(Graph* graph, Zone* tmp_zone) {
     Node* node = queue.front();
     queue.pop();
 
-    if (node->opcode() == IrOpcode::kLoopExit) {
+    if (node->opcode() == IrOpcode::kLoopExit) {//only process kLoopExit node
       Node* control = NodeProperties::GetControlInput(node);
       EliminateLoopExit(node);//
       if (!visited[control->id()]) {
