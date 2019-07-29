@@ -118,7 +118,7 @@ struct Peeling {
   }
   //size()-1, size(), size()+1
   void Insert(Node* original, Node* copy) {
-    node_map.Set(original, 1 + pairs->size());
+    node_map.Set(original, 1 + pairs->size());//node->index
     pairs->push_back(original);//size()
     pairs->push_back(copy);//size()+1
   }
@@ -242,6 +242,7 @@ PeeledIteration* LoopPeeler::Peel(LoopTree::Loop* loop) {
   //============================================================================
   Node* loop_node = loop_tree_->GetLoopControl(loop);
   Node* new_entry;
+  Node* old_entry = loop_node->InputAt(0);//panjie
   int backedges = loop_node->InputCount() - 1;
   if (backedges > 1) {
     // Multiple backedges from original loop, therefore multiple output edges
@@ -306,8 +307,50 @@ PeeledIteration* LoopPeeler::Peel(LoopTree::Loop* loop) {
         break;
     }
   }
+
+  //panjie
+  EliminateBranch(loop_node, old_entry);
   return iter;
 }
+//
+void LoopPeeler::EliminateBranch(Node* loop, Node* old_entry) {
+
+    PrintF("panjie--- Eliminate branch in peel loop %i:\n", loop->id());
+
+    NodeVector tmp(tmp_zone_);
+    Node* input = loop->InputAt(0);
+    if (input->opcode() == IrOpcode::kIfFalse ||
+        input->opcode() == IrOpcode::kIfTrue)
+    {
+
+        tmp.push_back(input);
+        Node* branch = input->InputAt(0);
+        tmp.push_back(branch);
+        Node* cond = branch->InputAt(0);
+        tmp.push_back(cond);
+        // Normalize to less than comparison.
+        switch (cond->opcode()) {
+        case IrOpcode::kWord32Equal:
+            if (cond->InputAt(0)->opcode() == IrOpcode::kWord32Equal)
+            {
+                cond = cond->InputAt(0);
+                tmp.push_back(cond);
+            }
+            break;
+        case IrOpcode::kJSLessThan:
+            break;
+        default:
+            break;
+        }
+
+        loop->ReplaceInput(0, old_entry);
+        for (Node* node: tmp)
+        {
+            node->Kill();
+        }
+   }
+}
+
 
 void LoopPeeler::PeelInnerLoops(LoopTree::Loop* loop) {
   // If the loop has nested loops, peel inside those.
