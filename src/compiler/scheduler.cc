@@ -2148,6 +2148,8 @@ class LoopTransform: public ZoneObject {
 
   bool CanVectorize(LoopTree::Loop* loop)
   {
+      //TODO FIXME
+      return false;
 
      if(HasMultipleOutput(loop))
      {
