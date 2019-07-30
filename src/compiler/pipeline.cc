@@ -2537,12 +2537,13 @@ void Pipeline::GenerateCodeForWasmFunction(
   }
 
  //panjie
+  /*
   if(data.graph()->HasSimd())
   {
     pipeline.Run<LoopPeelingPhaseWasm>();
     pipeline.RunPrintAndVerify(LoopPeelingPhaseWasm::phase_name(), true);
   }
-
+*/
   //end panjie
 
   pipeline.ComputeScheduledGraph();
