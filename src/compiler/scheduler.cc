@@ -2146,10 +2146,11 @@ class LoopTransform: public ZoneObject {
       return false;
   }
 
+
   bool CanVectorize(LoopTree::Loop* loop)
   {
-      //TODO FIXME
-      return false;
+     //TODO FIXME
+     //return false;
 
      if(HasMultipleOutput(loop))
      {
@@ -2312,7 +2313,7 @@ setflag:
           return;
       }
       // Only peel small-enough loops.
-      if (loop->TotalSize() >1000) return;
+      if (loop->TotalSize() > kMaxLoopNodes) return;
       if (FLAG_trace_turbo_loop) {
           PrintF("panjie Vectorize loop with header: ");
           for (Node* node : loop_tree_->HeaderNodes(loop)) {
@@ -2549,6 +2550,7 @@ private:
 
   LoopTree* loop_tree_;
   std::set<IrOpcode::Value> supported_opcodes_;
+  static const size_t kMaxLoopNodes = 1000;
 };
 
 // -----------------------------------------------------------------------------
