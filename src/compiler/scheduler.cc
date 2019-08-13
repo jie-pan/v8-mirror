@@ -1994,6 +1994,24 @@ class LoopTransform: public ZoneObject {
       return !has_simd;
   }
 
+  //every loop has at least 1 call(Stack Check)
+  bool HasFunctionCall(LoopTree::Loop* loop)
+  {
+      //TODO, don't check call count, check call parameter
+      int call_count = 0;
+      for (Node* node : loop_tree_->LoopNodes(loop)) {
+          if(node->opcode() == IrOpcode::kCall)
+          {
+              call_count++;
+          }
+      }
+      if(call_count > 1)
+      {
+        TRACE("panjie--- call count > 1 \n");
+      }
+      return call_count > 1;
+  }
+
   bool InductionIsConst(InductionVariable* var)
   {
      Node* init = var->init_value();
@@ -2162,7 +2180,11 @@ class LoopTransform: public ZoneObject {
          TRACE("panjie--- HasUnsupportedOpcode return\n");
          return false;
      }
-
+     if(HasFunctionCall(loop))
+     {
+         TRACE("panjie--- HasFunctionCall return\n");
+         return false;
+     }
      if(CheckInductionVariables(loop))
      {
          TRACE("panjie--- CheckInductionVariables return\n");
@@ -2496,6 +2518,8 @@ setflag:
         case IrOpcode::kWord32Equal:
             if (cond->InputAt(0)->opcode() == IrOpcode::kWord32Equal)
                 cond = cond->InputAt(0);
+            break;
+        case IrOpcode::kInt32LessThan://threshold
             break;
         case IrOpcode::kJSLessThan:
             break;
