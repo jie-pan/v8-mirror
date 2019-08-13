@@ -66,8 +66,11 @@ Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags) {
   scheduler.ScheduleLate();
 
   scheduler.SealFinalSchedule();
+
   //panjie
-  scheduler.TransformLoop();
+  if (FLAG_wasm_revec) {
+    scheduler.TransformLoop();
+  }
   return schedule;
 }
 
