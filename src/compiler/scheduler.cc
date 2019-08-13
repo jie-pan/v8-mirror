@@ -1986,7 +1986,7 @@ class LoopTransform: public ZoneObject {
               TRACE("panjie--- found simd node #%d:%s\n", node->id(), node->op()->mnemonic());
               if (supported_opcodes_.find(node->opcode()) == supported_opcodes_.end())
               {
-                    TRACE("panjie---unsupported simd node #%d:%s\n", node->id(), node->op()->mnemonic());
+                    TRACE("panjie--- unsupported simd node #%d:%s\n", node->id(), node->op()->mnemonic());
                     return true;
               }
           }
@@ -2318,12 +2318,14 @@ setflag:
   {
       Node* loop_node = loop_tree_->GetLoopControl(loop);
 
+      TRACE("panjie--- +++start Vectorize loop %i:\n", loop_node->id());
       DetectInductionVariables(loop_node);
       GetLoopCount(loop_node);
       if(CanVectorize(loop))
       {
           ReVectorize(loop);
       }
+      TRACE("panjie--- +++finish Vectorize loop %i:\n\n", loop_node->id());
   }
 
   void VectorizeInnerLoops(LoopTree::Loop* loop) {
@@ -2485,7 +2487,7 @@ setflag:
           InductionVariable* induction_var = TryGetInductionVariable(phi);
           if (induction_var) {
             induction_vars_[phi->id()] = induction_var;
-            TRACE("panjie--- %i", induction_var->phi()->id());
+            //TRACE("panjie--- %i", induction_var->phi()->id());
           }
         }
       }
@@ -2560,7 +2562,7 @@ setflag:
                                          cond, final_value);
 
                 iterator_vars_[induction_var->phi()->id()] = iterator_var;
-                TRACE("---panjie found main induction_var %i\n", induction_var->phi()->id());
+                TRACE("panjie--- found main induction_var %i\n", induction_var->phi()->id());
             }
         }
     }
