@@ -351,7 +351,7 @@ class DisassemblerX64 {
   }
 
   bool vex_128() const {
-    DCHECK(vex_byte0_ == VEX3_PREFIX || vex_byte0_ == VEX2_PREFIX);
+    //DCHECK(vex_byte0_ == VEX3_PREFIX || vex_byte0_ == VEX2_PREFIX);
     byte checked = vex_byte0_ == VEX3_PREFIX ? vex_byte2_ : vex_byte1_;
     return (checked & 4) == 0;
   }
