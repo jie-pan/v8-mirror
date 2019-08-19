@@ -3041,8 +3041,15 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleArchInstruction(
       CpuFeatureScope sse_scope(tasm(), SSE4_1);
       XMMRegister dst = i.OutputSimd128Register();
       XMMRegister src = i.InputSimd128Register(1);
-      __ pminub(dst, src);
-      __ pcmpeqb(dst, src);
+      if(need_convert) {
+          __ vpminub256(dst, dst, src);
+          __ vpcmpeqb256(dst, dst, src);
+      }
+      else {
+          __ pminub(dst, src);
+          __ pcmpeqb(dst, src);
+      }
+
       break;
     }
     case kX64S128And: {

@@ -1959,7 +1959,9 @@ class LoopTransform: public ZoneObject {
       supported_opcodes_.insert(IrOpcode::kI8x16LtU);
       supported_opcodes_.insert(IrOpcode::kI8x16LeU);
       supported_opcodes_.insert(IrOpcode::kI8x16GtU);
+      */
       supported_opcodes_.insert(IrOpcode::kI8x16GeU);
+      /*
       supported_opcodes_.insert(IrOpcode::kS128Load);
       supported_opcodes_.insert(IrOpcode::kS128Store);
       supported_opcodes_.insert(IrOpcode::kS128Zero);
