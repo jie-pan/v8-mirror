@@ -35,7 +35,7 @@ class V8_EXPORT_PRIVATE Scheduler {
 
   // The complete scheduling algorithm. Creates a new schedule and places all
   // nodes from the graph into it.
-  static Schedule* ComputeSchedule(Zone* temp_zone, Graph* graph, Flags flags);
+  static Schedule* ComputeSchedule(Zone* temp_zone, Graph* graph, Flags flags, char* function_name = NULL);
 
   // Compute the RPO of blocks in an existing schedule.
   static BasicBlockVector* ComputeSpecialRPO(Zone* zone, Schedule* schedule);

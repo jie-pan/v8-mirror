@@ -44,7 +44,7 @@ Scheduler::Scheduler(Zone* zone, Graph* graph, Schedule* schedule, Flags flags,
   node_data_.resize(graph->NodeCount(), DefaultSchedulerData());
 }
 
-Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags) {
+Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags, char* function_name) {
   Zone* schedule_zone =
       (flags & Scheduler::kTempSchedule) ? zone : graph->zone();
 
@@ -60,6 +60,11 @@ Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags) {
 
   //panjie
   if (FLAG_wasm_revec) {
+     if(function_name != NULL)
+     {
+        TRACE("panjie--- function %s ", function_name);
+     }
+
     scheduler.TransformLoop();
   }
 
