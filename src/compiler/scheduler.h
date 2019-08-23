@@ -126,6 +126,7 @@ class V8_EXPORT_PRIVATE Scheduler {
   // Phase 7: panjie
   friend class LoopTransform;
   void TransformLoop();
+  void MarkTransform();
 
   void FuseFloatingControl(BasicBlock* block, Node* node);
   void MovePlannedNodes(BasicBlock* from, BasicBlock* to);

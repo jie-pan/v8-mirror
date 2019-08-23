@@ -80,7 +80,7 @@ Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags, char
 
   //panjie
   if (FLAG_wasm_revec) {
-    //scheduler.TransformLoop();
+      scheduler.MarkTransform();
   }
   return schedule;
 }
@@ -2108,6 +2108,264 @@ class LoopTransform: public ZoneObject {
 
   }
 
+  bool SatifyConstCheck(IteratorVariable* var)
+  {
+     Node* init = var->init_value();
+     Node* incr = var->increment();
+     Node* final = var->final_value();
+     int64_t init_value = 0;
+     int64_t incr_value = 0;
+     int64_t final_value = 0;
+
+     Node* cond = var->cond();
+     IrOpcode::Value op = var->cond()->opcode();
+
+     int64_t iterator_count = 0;
+
+     if (init->opcode() == IrOpcode::kInt32Constant &&
+         incr->opcode() == IrOpcode::kInt32Constant &&
+         final->opcode() == IrOpcode::kInt32Constant)
+     {
+          init_value = OpParameter<int32_t>(init->op());
+          incr_value = OpParameter<int32_t>(incr->op());
+          final_value = OpParameter<int32_t>(final->op());
+     }
+     else if(init->opcode() == IrOpcode::kInt64Constant &&
+         incr->opcode() == IrOpcode::kInt64Constant &&
+         final->opcode() == IrOpcode::kInt64Constant)
+     {
+          init_value = OpParameter<int64_t>(init->op());
+          incr_value = OpParameter<int64_t>(incr->op());
+          final_value = OpParameter<int64_t>(final->op());
+     }
+     else
+     {
+         return false;
+     }
+
+     if(incr_value == 0)
+     {
+         return false;
+     }
+
+
+     if(incr_value > 0)
+     {
+         if(final_value - init_value <= incr_value*2)
+         {
+            return false;
+         }
+
+        if(cond->InputAt(1) != final) {
+             return false;
+        }
+
+        //TODO
+        if(op == IrOpcode::kWord32Equal)
+        {
+            if((((final_value - init_value) / incr_value) &1) == 0)
+            {
+                return true;
+            }
+        }
+        else if(op == IrOpcode::kInt32LessThan)
+        {
+
+        }
+        else if(op == IrOpcode::kInt32LessThanOrEqual)
+        {
+
+        }
+     }
+     else { //<0 only, =0 is exclude
+
+         if( init_value - final_value <= (-incr_value)*2)
+         {
+            return false;
+         }
+
+         if(cond->InputAt(0) != final) {
+             return false;
+         }
+
+         if(op == IrOpcode::kWord32Equal)
+         {
+
+         }
+         else if(op == IrOpcode::kInt32LessThan)
+         {
+            if(final_value == (-incr_value) -1) {
+                return true;
+            }
+         }
+         else if(op == IrOpcode::kInt32LessThanOrEqual)
+         {
+
+            if(final_value == (-incr_value)) {
+                return true;
+            }
+         }
+     }
+
+     return false;
+
+  }
+
+
+  bool SatifyNonconstCheck(IteratorVariable* var)
+  {
+     Node* init = var->init_value();
+     Node* incr = var->increment();
+     Node* final = var->final_value();
+
+     int64_t incr_value = 0;
+     if (!NodeProperties::IsConstant(init) &&
+         !NodeProperties::IsConstant(final))
+     {
+         //must have >=2 const
+         return false;
+     }
+
+
+     if ( incr->opcode() == IrOpcode::kInt32Constant )
+     {
+          incr_value = OpParameter<int32_t>(incr->op());
+     }
+     else if(incr->opcode() == IrOpcode::kInt64Constant)
+     {
+          incr_value = OpParameter<int64_t>(incr->op());
+     }
+
+
+     if(incr_value > 0)
+     {
+         if(NodeProperties::IsConstant(init))
+         {
+            if(final->opcode() == IrOpcode::kWord32And)
+            {
+                Node* left = final->InputAt(0);
+                Node* right = final->InputAt(1);
+                Node* para = nullptr;
+                Node* mask = nullptr;
+                int64_t mask_value = 0;
+                if(NodeProperties::IsConstant(left))
+                {
+                    para = right;
+                    mask = left;
+                }
+                else if(NodeProperties::IsConstant(right))
+                {
+                    para = left;
+                    mask = right;
+                }
+                if(mask == nullptr)
+                {
+                    return false;
+                }
+
+                for (Node* use : para->uses()) {
+                    if(use->opcode() == IrOpcode::kUint32LessThanOrEqual ||
+                            use->opcode() == IrOpcode::kInt32LessThanOrEqual)
+                    {
+                        Node* leftover = nullptr;
+                        if(use->InputAt(0) == para &&
+                                NodeProperties::IsConstant(use->InputAt(1)))
+                        {
+                            leftover = use->InputAt(1);
+                        }
+                        else if(use->InputAt(1) == para &&
+                                NodeProperties::IsConstant(use->InputAt(0)))
+                        {
+                            leftover = use->InputAt(0);
+                        }
+
+                        if(leftover != nullptr)
+                        {
+                            int64_t leftover_value = 0;
+                            if ( leftover->opcode() == IrOpcode::kInt32Constant )
+                            {
+                                leftover_value = OpParameter<int32_t>(leftover->op());
+                                mask_value = OpParameter<int32_t>(mask->op());
+                            }
+                            else if(leftover->opcode() == IrOpcode::kInt64Constant)
+                            {
+                                leftover_value = OpParameter<int64_t>(leftover->op());
+                                mask_value = OpParameter<int64_t>(mask->op());
+                            }
+
+                            if(leftover_value == (~mask_value))
+                            {
+                                if(leftover->UseCount() == 1 && mask->UseCount() == 1)
+                                {
+                                    return true;
+                                }
+                            }
+
+                        }
+                    }
+                }
+            }
+
+            /*
+                for (Edge edge : node->use_edges()) {
+                    if (NodeProperties::IsControlEdge(edge)) {
+                        Node* marker = edge.from();
+                    }
+                }
+                */
+         }
+
+     }
+     else
+     {
+
+     }
+     return false;
+  }
+
+  bool SatifyIteratorCheck(IteratorVariable* var)
+  {
+     Node* init = var->init_value();
+     Node* incr = var->increment();
+     Node* final = var->final_value();
+
+     if (!NodeProperties::IsConstant(init) ||
+         !NodeProperties::IsConstant(incr) ||
+         !NodeProperties::IsConstant(final))
+     {
+         return SatifyNonconstCheck(var);
+     }
+     else
+     {
+         return SatifyConstCheck(var);
+     }
+
+
+        /*
+     #define MACHINE_COMPARE_BINOP_LIST(V) \
+  V(Word32Equal)                      \
+  V(Word64Equal)                      \
+  V(Int32LessThan)                    \
+  V(Int32LessThanOrEqual)             \
+  V(Uint32LessThan)                   \
+  V(Uint32LessThanOrEqual)            \
+  V(Int64LessThan)                    \
+  V(Int64LessThanOrEqual)             \
+  V(Uint64LessThan)                   \
+  V(Uint64LessThanOrEqual)            \
+  V(Float32Equal)                     \
+  V(Float32LessThan)                  \
+  V(Float32LessThanOrEqual)           \
+  V(Float64Equal)                     \
+  V(Float64LessThan)                  \
+  V(Float64LessThanOrEqual)
+
+  */
+
+    return false;
+  }
+
+
   bool IteratorIsConstAndEven(IteratorVariable* var)
   {
      Node* init = var->init_value();
@@ -2127,6 +2385,7 @@ class LoopTransform: public ZoneObject {
      {
          return false;
      }
+
      if (init->opcode() == IrOpcode::kInt32Constant &&
          incr->opcode() == IrOpcode::kInt32Constant &&
          final->opcode() == IrOpcode::kInt32Constant)
@@ -2152,14 +2411,22 @@ class LoopTransform: public ZoneObject {
 
      if(incr_value > 0)
      {
+         if(final_value - init_value <= incr_value*2)
+         {
+            return false;
+         }
 
         if(cond->InputAt(1) != final) {
              return false;
         }
 
+        //TODO
         if(op == IrOpcode::kWord32Equal)
         {
-
+            if((((final_value - init_value) / incr_value) &1) == 0)
+            {
+                return true;
+            }
         }
         else if(op == IrOpcode::kInt32LessThan)
         {
@@ -2170,7 +2437,12 @@ class LoopTransform: public ZoneObject {
 
         }
      }
-     else { //<0 only, =0 is exclued
+     else { //<0 only, =0 is exclude
+
+         if( init_value - final_value <= (-incr_value)*2)
+         {
+            return false;
+         }
 
          if(cond->InputAt(0) != final) {
              return false;
@@ -2244,7 +2516,7 @@ class LoopTransform: public ZoneObject {
               {
                   count++;
                   IteratorVariable* var = it->second;
-                  if(!IteratorIsConstAndEven(var))
+                  if(!SatifyIteratorCheck(var))
                   {
                       return true;
                   }
@@ -2331,8 +2603,10 @@ class LoopTransform: public ZoneObject {
   //////////////////////////////////////////////////////////
 
   //mark for sse-avx convert
-  void MarkBlockCandi(Node* loop_node)
+  void MarkBlockCandi(LoopTree::Loop* loop)
   {
+      Node* loop_node = loop_tree_->GetLoopControl(loop);
+
       BasicBlock* header;
 
       // Mark the inputs of all phis in loop headers as used.
@@ -2388,7 +2662,7 @@ setflag:
                       if(used.find(incr->id()) == used.end())
                       {
                         TRACE("panjie--- double constant node %d\n", incr->id());
-                        DoubleConstantValue(incr);
+                        TransformConstantValue(incr, 2, 0);
                         used.insert(incr->id());
                       }
                   }
@@ -2402,7 +2676,9 @@ setflag:
 
       }
   }
-  void DoubleOddConstantValue(Node* node)
+
+  //param* multiplier + addend
+  void TransformConstantValue(Node* node, int multiplier, int addend)
   {
       if (!NodeProperties::IsConstant(node))
       {
@@ -2415,15 +2691,16 @@ setflag:
           //Operator1<int32_t> * op1 =  dynamic_cast< Operator1<int32_t>* > (node->op());
           Operator1<int32_t> * op1 =  (Operator1<int32_t>* ) (node->op());
           int32_t value = op1->parameter();
-
+        /*
           int value_out = op1->ValueOutputCount();
-          NodeProperties::ChangeOp(node,
-                                   new (zone_) Operator1<int32_t>(         // --
-                                           IrOpcode::kInt32Constant, Operator::kPure,  // opcode
-                                           "Int32Constant",                            // name
-                                           0, 0, 0, value_out, 0, 0,                           // counts
-                                           value*2 + 1)                                     // parameter
-                                   );
+          Operator* newop = new (zone_) Operator1<int32_t>(         // --
+                  IrOpcode::kInt32Constant, Operator::kPure,  // opcode
+                  "Int32Constant",                            // name
+                  0, 0, 0, value_out, 0, 0,                           // counts, TODO, restore
+                  value*2) ;                                    // parameter
+          NodeProperties::ChangeOp(node,newop);
+         */
+          op1->SetParameter(value * multiplier + addend);
 
       }
       else if(node->opcode() == IrOpcode::kInt64Constant)
@@ -2432,53 +2709,8 @@ setflag:
           Operator1<int64_t> * op1 =  (Operator1<int64_t>* ) (node->op());
           int64_t value = op1->parameter();
 
+          /*
           int value_out = op1->ValueOutputCount();
-          NodeProperties::ChangeOp(node,
-                                   new (zone_) Operator1<int64_t>(         // --
-                                           IrOpcode::kInt64Constant, Operator::kPure,  // opcode
-                                           "Int64Constant",                            // name
-                                           0, 0, 0, value_out, 0, 0,                           // counts
-                                           value*2 + 1)                                     // parameter
-                                   );
-      }
-      else
-      {
-          TRACE("panjie--- Int64 and Int32 const only!, unimplement\n");
-      }
-  }
-
-  void DoubleConstantValue(Node* node)
-  {
-      if (!NodeProperties::IsConstant(node))
-      {
-          TRACE("panjie--- can't double non-const node\n");
-          return;
-      }
-
-      if(node->opcode() == IrOpcode::kInt32Constant)
-      {
-          //Operator1<int32_t> * op1 =  dynamic_cast< Operator1<int32_t>* > (node->op());
-          Operator1<int32_t> * op1 =  (Operator1<int32_t>* ) (node->op());
-          int32_t value = op1->parameter();
-
-          int value_out = op1->ValueOutputCount();
-          NodeProperties::ChangeOp(node,
-                                   new (zone_) Operator1<int32_t>(         // --
-                                           IrOpcode::kInt32Constant, Operator::kPure,  // opcode
-                                           "Int32Constant",                            // name
-                                           0, 0, 0, value_out, 0, 0,                           // counts, TODO, restore
-                                           value*2)                                     // parameter
-                                   );
-
-      }
-      else if(node->opcode() == IrOpcode::kInt64Constant)
-      {
-          //Operator1<int64_t> * op1 =  dynamic_cast< Operator1<int64_t>* > (node->op());
-          Operator1<int64_t> * op1 =  (Operator1<int64_t>* ) (node->op());
-          int64_t value = op1->parameter();
-
-          int value_out = op1->ValueOutputCount();
-
           NodeProperties::ChangeOp(node,
                                    new (zone_) Operator1<int64_t>(         // --
                                            IrOpcode::kInt64Constant, Operator::kPure,  // opcode
@@ -2486,6 +2718,8 @@ setflag:
                                            0, 0, 0, value_out, 0, 0,                           // counts
                                            value*2)                                     // parameter
                                    );
+                                   */
+          op1->SetParameter(value * multiplier + addend);
       }
       else
       {
@@ -2568,14 +2802,14 @@ setflag:
          else if(op == IrOpcode::kInt32LessThan)
          {
             if(final_value == (-incr_value) -1) {
-                DoubleOddConstantValue(final);
+               TransformConstantValue(final, 2, 1);
             }
          }
          else if(op == IrOpcode::kInt32LessThanOrEqual)
          {
 
             if(final_value == (-incr_value)) {
-                DoubleConstantValue(final);
+               TransformConstantValue(final, 2, 0);
             }
          }
      }
@@ -2601,25 +2835,29 @@ setflag:
   {
       Node* loop_node = loop_tree_->GetLoopControl(loop);
 
-      //MarkBlockCandi(loop_node);//mark for sse-avx convert
-
       //the dependency order
       UpdateIterator(loop);
-      //UpdateInductionStride(loop);
+      UpdateInductionStride(loop);
+
+      //MarkBlockCandi(loop_node);//mark for sse-avx convert
   }
 
   void ReVectorizeIfPossible(LoopTree::Loop* loop)
   {
       Node* loop_node = loop_tree_->GetLoopControl(loop);
 
-      TRACE("panjie--- +++start Vectorize loop %i:\n", loop_node->id());
+      TRACE("panjie--- +++ gather info for loop %i:\n", loop_node->id());
       DetectInductionVariables(loop_node);
       GetLoopCount(loop_node);
       if(CanVectorize(loop))
       {
+          converted_loop.insert(loop);
           ReVectorize(loop);
+          TRACE("panjie--- +++ finish revec loop %i:\n\n", loop_node->id());
       }
-      TRACE("panjie--- +++finish Vectorize loop %i:\n\n", loop_node->id());
+      else {
+          TRACE("panjie--- +++ can't revec loop %i:\n\n", loop_node->id());
+      }
   }
 
   void VectorizeInnerLoops(LoopTree::Loop* loop) {
@@ -2671,6 +2909,17 @@ setflag:
       }
       */
   }
+
+
+  void MarkBlockInLoop()
+  {
+
+    for (std::set<LoopTree::Loop* >::iterator it = converted_loop.begin(); it != converted_loop.end(); ++it) {
+
+        MarkBlockCandi(*it);
+    }
+  }
+
    InductionVariable* TryGetInductionVariable(Node* phi) {
       DCHECK_EQ(2, phi->op()->ValueInputCount());
       Node* loop = NodeProperties::GetControlInput(phi);
@@ -2785,13 +3034,13 @@ setflag:
           }
         }
       }
-      TRACE("\n");
     }
+
     void GetLoopCount(Node* loop) {
       if (loop->op()->ControlInputCount() != 2)
           return;
 
-      TRACE("panjie--- Loop Count for loop %i:\n", loop->id());
+      TRACE("panjie--- Loop Count for loop %i\n", loop->id());
       int max = NodeProperties::PastControlIndex(loop);
       for (int i = NodeProperties::FirstControlIndex(loop); i < max; i++) {
         Node* input = loop->InputAt(i);
@@ -2801,8 +3050,6 @@ setflag:
             VisitIf(input, true);
 
         }
-
-        TRACE("\n");
       }
     }
 
@@ -2871,6 +3118,7 @@ private:
 
   LoopTree* loop_tree_;
   std::set<IrOpcode::Value> supported_opcodes_;
+  std::set<LoopTree::Loop*> converted_loop;
   static const size_t kMaxLoopNodes = 1000;
 };
 
@@ -2884,6 +3132,12 @@ void Scheduler::TransformLoop() {
   // is being spanned by the graph's start and end nodes.
   loop_transformer_= new (zone_) LoopTransform(zone_, this);
   loop_transformer_->Run();
+
+}
+// Phase 7:
+void Scheduler::MarkTransform() {
+  TRACE("--- Loop Transform -------------------------------------------\n");
+    loop_transformer_->MarkBlockInLoop();
 
 }
 
