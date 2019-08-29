@@ -151,7 +151,12 @@ bool PrintRawWasmCode(AccountingAllocator* allocator, const FunctionBody& body,
     unsigned length =
         WasmDecoder<Decoder::kNoValidate>::OpcodeLength(&decoder, i.pc());
 
+    unsigned offset = 1;
     WasmOpcode opcode = i.current();
+    if (WasmOpcodes::IsPrefixOpcode(opcode)) {
+      opcode = i.prefixed_opcode();
+      offset = 2;
+    }
     if (line_numbers) line_numbers->push_back(i.position());
     if (opcode == kExprElse || opcode == kExprCatch) {
       control_depth--;
@@ -164,12 +169,7 @@ bool PrintRawWasmCode(AccountingAllocator* allocator, const FunctionBody& body,
         "                                                                ";
     os.write(padding, num_whitespaces);
 
-    WasmOpcode realopcode = opcode;
-    if(opcode == kNumericPrefix || opcode == kAtomicPrefix || opcode == kSimdPrefix)
-    {
-        realopcode = static_cast<WasmOpcode>(opcode << 8 | *(i.pc() + 1));
-    }
-    os << RawOpcodeName(realopcode) << ",";
+    os << RawOpcodeName(opcode) << ",";
 
     if (opcode == kExprLoop || opcode == kExprIf || opcode == kExprBlock ||
         opcode == kExprTry) {
@@ -193,13 +193,7 @@ bool PrintRawWasmCode(AccountingAllocator* allocator, const FunctionBody& body,
       }
 #undef CASE_LOCAL_TYPE
     } else {
-
-      unsigned j = 1;
-      if(opcode == kNumericPrefix || opcode == kAtomicPrefix || opcode == kSimdPrefix)
-      {
-        j++;
-      }
-      for (; j < length; ++j) {
+      for (unsigned j = offset; j < length; ++j) {
         os << " 0x" << AsHex(i.pc()[j], 2) << ",";
       }
     }
