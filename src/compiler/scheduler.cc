@@ -58,13 +58,11 @@ Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags,
       new (schedule_zone) Schedule(schedule_zone, node_count_hint);
   Scheduler scheduler(zone, graph, schedule, flags, node_count_hint);
 
-  // panjie
   if (FLAG_wasm_revec) {
     if (function_name != NULL) {
-      TRACE("panjie--- function %s ", function_name);
+      TRACE("revec--- function %s ", function_name);
     }
-
-    scheduler.TransformLoop();
+    scheduler.AnalysisAndUpdateGraph();
   }
 
   scheduler.BuildCFG();
@@ -77,10 +75,10 @@ Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags,
 
   scheduler.SealFinalSchedule();
 
-  // panjie
   if (FLAG_wasm_revec) {
-    scheduler.MarkTransform();
+    scheduler.MarkBasicBlocks();
   }
+
   return schedule;
 }
 
@@ -1831,9 +1829,9 @@ void Scheduler::MovePlannedNodes(BasicBlock* from, BasicBlock* to) {
   }
 }
 
-class LoopTransform : public ZoneObject {
+class LoopRevectorizer : public ZoneObject {
  public:
-  LoopTransform(Zone* zone, Scheduler* scheduler)
+  LoopRevectorizer(Zone* zone, Scheduler* scheduler)
       : zone_(zone),
         scheduler_(scheduler),
         schedule_(scheduler->schedule_),
@@ -1989,14 +1987,14 @@ class LoopTransform : public ZoneObject {
   bool HasUnsupportedOpcode(LoopTree::Loop* loop) {
     bool has_simd = false;
     for (Node* node : loop_tree_->LoopNodes(loop)) {
-      if (NodeProperties::IsSIMD(node)) {
+      if (NodeProperties::IsSimd(node)) {
         has_simd = true;
 
-        TRACE("panjie--- found simd node #%d:%s\n", node->id(),
+        TRACE("revec--- found simd node #%d:%s\n", node->id(),
               node->op()->mnemonic());
         if (supported_opcodes_.find(node->opcode()) ==
             supported_opcodes_.end()) {
-          TRACE("panjie--- unsupported simd node #%d:%s\n", node->id(),
+          TRACE("revec--- unsupported simd node #%d:%s\n", node->id(),
                 node->op()->mnemonic());
           return true;
         }
@@ -2015,7 +2013,7 @@ class LoopTransform : public ZoneObject {
       }
     }
     if (call_count > 1) {
-      TRACE("panjie--- call count > 1 \n");
+      TRACE("revec--- call count > 1 \n");
     }
     return call_count > 1;
   }
@@ -2059,9 +2057,9 @@ class LoopTransform : public ZoneObject {
           InductionVariable* var = it->second;
           Node* incr = var->increment();
           if (incr->UseCount() != use_count_[incr->id()]) {
-            TRACE("panjie--- node %i use = %d != %d\n", incr->id(),
+            TRACE("revec--- node %i use = %d != %d\n", incr->id(),
                   incr->UseCount(), use_count_[incr->id()]);
-            TRACE("panjie--- use node:");
+            TRACE("revec--- use node:");
             for (Edge const edge : incr->use_edges()) {
               // if (!IsValueEdge(edge))
               // continue;
@@ -2144,7 +2142,7 @@ class LoopTransform : public ZoneObject {
         if (reminder != 0) {
           trip_count++;
         }
-        if (trip_count & 1 == 0) {
+        if ((trip_count & 1) == 0) {
           return true;
         }
 #endif
@@ -2332,22 +2330,21 @@ V(Float64LessThanOrEqual)
 
   // TODO handle ReductionVariable
   bool HasOutsideDependency(LoopTree::Loop* loop) {
-    Node* loop_node = loop_tree_->GetLoopControl(loop);
-    // input
+    // check input
     for (Node* node : loop_tree_->LoopNodes(loop)) {
       for (Node* input : node->inputs()) {
-        if (!loop_tree_->Contains(loop, input)) {  // use of nodes outside loop
-          if (NodeProperties::IsSIMD(input)) {
+        if (!loop_tree_->Contains(loop, input)) {  // input of nodes outside loop
+          if (NodeProperties::IsSimd(input)) {
             return true;
           }
         }
       }
     }
-    // uses
+    // check uses
     for (Node* node : loop_tree_->LoopNodes(loop)) {
       for (Node* use : node->uses()) {
         if (!loop_tree_->Contains(loop, use)) {  // use of nodes outside loop
-          if (NodeProperties::IsSIMD(use)) {
+          if (NodeProperties::IsSimd(use)) {
             return true;
           }
         }
@@ -2367,33 +2364,33 @@ V(Float64LessThanOrEqual)
 
   bool CanVectorize(LoopTree::Loop* loop) {
     if (HasMultipleOutput(loop)) {
-      TRACE("panjie--- HasMultipleOutput return\n");
+      TRACE("revec--- HasMultipleOutput return\n");
       return false;
     }
     if (HasUnsupportedOpcode(loop)) {
-      TRACE("panjie--- HasUnsupportedOpcode return\n");
+      TRACE("revec--- HasUnsupportedOpcode return\n");
       return false;
     }
     if (HasFunctionCall(loop)) {
-      TRACE("panjie--- HasFunctionCall return\n");
+      TRACE("revec--- HasFunctionCall return\n");
       return false;
     }
     if (UnsupportedInductionVariables(loop)) {
-      TRACE("panjie--- CheckInductionVariables return\n");
+      TRACE("revec--- CheckInductionVariables return\n");
       return false;
     }
     if (UnsupportedMainIterator(loop)) {
-      TRACE("panjie--- CheckMainIterator return\n");
+      TRACE("revec--- CheckMainIterator return\n");
       return false;
     }
     if (HasOutsideDependency(loop)) {
-      TRACE("panjie--- HasOutsizeDependency return\n");
+      TRACE("revec--- HasOutsizeDependency return\n");
       return false;
     }
 
     // TODO
     if (HasMemoryDependency()) {
-      TRACE("panjie--- HasMemoryDependency return");
+      TRACE("revec--- HasMemoryDependency return");
       return false;
     }
 
@@ -2403,47 +2400,49 @@ V(Float64LessThanOrEqual)
   //////////////////////////////////////////////////////////
 
   // mark for sse-avx convert
-  void MarkBlockCandi(LoopTree::Loop* loop) {
+  BasicBlock* BasicBlockForLoopHeader(LoopTree::Loop* loop) {
     Node* loop_node = loop_tree_->GetLoopControl(loop);
 
-    BasicBlock* header;
+    BasicBlock* header = nullptr;
 
-    // Mark the inputs of all phis in loop headers as used.
     BasicBlockVector* blocks = schedule_->rpo_order();
     for (auto const block : *blocks) {
       if (block->IsLoopHeader()) {
         DCHECK_LE(2u, block->PredecessorCount());
-        /*     for (NodeVector::iterator i = block.begin(); i !=
-        block.end();
-        ++i) { if(*i == loop_node)
-          }
-        */
 
         for (Node* const node : *block) {
           if (node->opcode() == IrOpcode::kLoop && node == loop_node) {
             header = block;
-            TRACE("panjie--- block id:%d for loop node #%d:%s\n",
+            TRACE("revec--- block id:%d for loop node #%d:%s\n",
                   header->rpo_number(), node->id(), node->op()->mnemonic());
-            // TODO break
-            goto setflag;
+            return header;
           }
         }
       }
     }
-  setflag:
-    for (auto block : *blocks) {
-      if (header->LoopContains(block)) {
-        TRACE("panjie--- mark block id:%d for loop convert\n",
-              block->rpo_number());
-        block->set_need_convert(true);
+    return header;
+  }
+
+  void MarkBlocksInLoop(LoopTree::Loop* loop) {
+    BasicBlockVector* blocks = schedule_->rpo_order();
+
+    BasicBlock* header = BasicBlockForLoopHeader(loop);
+    if(header != nullptr)
+    {
+      for (auto block : *blocks) {
+        if (header->LoopContains(block)) {
+          TRACE("revec--- mark block id:%d for loop convert\n",
+                block->rpo_number());
+          block->set_need_convert(true);
+        }
       }
     }
   }
 
   // node->param = node->param * multiplier + addend
-  void TransformConstantValue(Node* node, int multiplier, int addend) {
+  void TransformConstantNode(Node* node, int multiplier, int addend) {
     if (!IsSupportedConstNode(node)) {
-      TRACE("panjie--- can't double non-const node\n");
+      TRACE("revec--- can't double non-const node\n");
       return;
     }
 
@@ -2481,7 +2480,7 @@ V(Float64LessThanOrEqual)
                                */
       op1->SetParameter(value * multiplier + addend);
     } else {
-      TRACE("panjie--- Int64 and Int32 const only!, unimplement\n");
+      TRACE("revec--- Int64 and Int32 const only!, unimplement\n");
     }
   }
 
@@ -2495,8 +2494,8 @@ V(Float64LessThanOrEqual)
           Node* incr = var->increment();
           if (IsSupportedConstNode(incr)) {
             if (used.find(incr->id()) == used.end()) {
-              TRACE("panjie--- double constant node %d\n", incr->id());
-              TransformConstantValue(incr, 2, 0);
+              TRACE("revec--- double constant node %d\n", incr->id());
+              TransformConstantNode(incr, 2, 0);
               used.insert(incr->id());
             }
 
@@ -2509,7 +2508,7 @@ V(Float64LessThanOrEqual)
           }
           // TODO
           else {
-            TRACE("panjie--- Update Stride failed\n");
+            TRACE("revec--- Update Stride failed\n");
           }
         }
       }
@@ -2568,11 +2567,11 @@ V(Float64LessThanOrEqual)
       if (op == IrOpcode::kWord32Equal) {
       } else if (op == IrOpcode::kInt32LessThan) {
         if (final_value == (-incr_value) - 1) {
-          TransformConstantValue(final, 2, 1);
+          TransformConstantNode(final, 2, 1);
         }
       } else if (op == IrOpcode::kInt32LessThanOrEqual) {
         if (final_value == (-incr_value)) {
-          TransformConstantValue(final, 2, 0);
+          TransformConstantNode(final, 2, 0);
         }
       }
     }
@@ -2590,7 +2589,7 @@ V(Float64LessThanOrEqual)
     }
   }
 
-  void ReVectorize(LoopTree::Loop* loop) {
+  void UpdateGraph(LoopTree::Loop* loop) {
     // the dependency order
     UpdateIterator(loop);
     UpdateInductionStride(loop);
@@ -2599,15 +2598,15 @@ V(Float64LessThanOrEqual)
   void ReVectorizeIfPossible(LoopTree::Loop* loop) {
     Node* loop_node = loop_tree_->GetLoopControl(loop);
 
-    TRACE("panjie--- +++ gather info for loop %i:\n", loop_node->id());
+    TRACE("revec--- +++ gather info for loop %i:\n", loop_node->id());
     DetectInductionVariables(loop_node);
     DetectMainIterator(loop_node);
     if (CanVectorize(loop)) {
-      converted_loop_.insert(loop);
-      ReVectorize(loop);
-      TRACE("panjie--- +++ finish revec loop %i:\n\n", loop_node->id());
+      selected_loop_.insert(loop);
+      UpdateGraph(loop);
+      TRACE("revec--- +++ finish revec loop %i:\n\n", loop_node->id());
     } else {
-      TRACE("panjie--- +++ can't revec loop %i:\n\n", loop_node->id());
+      TRACE("revec--- +++ can't revec loop %i:\n\n", loop_node->id());
     }
   }
 
@@ -2622,7 +2621,7 @@ V(Float64LessThanOrEqual)
     // Only revectorize small-enough loops.
     if (loop->TotalSize() > kMaxLoopNodes) return;
     if (FLAG_trace_turbo_loop) {
-      PrintF("panjie Vectorize loop with header: ");
+      PrintF("revec Vectorize loop with header: ");
       for (Node* node : loop_tree_->HeaderNodes(loop)) {
         PrintF("%i ", node->id());
       }
@@ -2632,7 +2631,7 @@ V(Float64LessThanOrEqual)
     ReVectorizeIfPossible(loop);  // entry
   }
 
-  void Run() {
+  void SelectLoopAndUpdateGraph() {
     if (!scheduler_->graph_->HasSimd()) {
       return;
     }
@@ -2643,10 +2642,10 @@ V(Float64LessThanOrEqual)
     }
   }
 
-  void MarkBlockInLoop() {
-    for (std::set<LoopTree::Loop*>::iterator it = converted_loop_.begin();
-         it != converted_loop_.end(); ++it) {
-      MarkBlockCandi(*it);
+  void MarkBlocksInLoops() {
+    for (auto it = selected_loop_.begin();
+         it != selected_loop_.end(); ++it) {
+      MarkBlocksInLoop(*it);
     }
   }
 
@@ -2718,7 +2717,7 @@ V(Float64LessThanOrEqual)
     }
     */
     TRACE(
-        "panjie--- induction var: phi %i, effect_phi %i, arith %i, incr "
+        "revec--- induction var: phi %i, effect_phi %i, arith %i, incr "
         "%i, "
         "init %i, type %i 0add 1sub\n",
         phi->id(), effect_phi->id(), arith->id(), incr->id(), initial->id(),
@@ -2730,7 +2729,7 @@ V(Float64LessThanOrEqual)
 
   void DetectInductionVariables(Node* loop) {
     if (loop->op()->ControlInputCount() != 2) return;
-    TRACE("panjie--- Loop variables for loop %i:\n", loop->id());
+    TRACE("revec--- Loop variables for loop %i:\n", loop->id());
     for (Edge edge : loop->use_edges()) {
       if (NodeProperties::IsControlEdge(edge) &&
           edge.from()->opcode() == IrOpcode::kPhi) {
@@ -2746,7 +2745,7 @@ V(Float64LessThanOrEqual)
   void DetectMainIterator(Node* loop) {
     if (loop->op()->ControlInputCount() != 2) return;
 
-    TRACE("panjie--- Loop Count for loop %i\n", loop->id());
+    TRACE("revec--- Loop Count for loop %i\n", loop->id());
     int max = NodeProperties::PastControlIndex(loop);
     for (int i = NodeProperties::FirstControlIndex(loop); i < max; i++) {
       Node* input = loop->InputAt(i);
@@ -2789,7 +2788,7 @@ V(Float64LessThanOrEqual)
                              induction_var->Type(), cond, final_value);
 
         iterator_vars_[induction_var->phi()->id()] = iterator_var;
-        TRACE("panjie--- found main induction_var %i\n",
+        TRACE("revec--- found main induction_var %i\n",
               induction_var->phi()->id());
       }
     }
@@ -2805,24 +2804,21 @@ V(Float64LessThanOrEqual)
 
   LoopTree* loop_tree_;
   std::set<IrOpcode::Value> supported_opcodes_;
-  std::set<LoopTree::Loop*> converted_loop_;
+  std::set<LoopTree::Loop*> selected_loop_;
   static const size_t kMaxLoopNodes = 1000;
 };
 
 // -----------------------------------------------------------------------------
 // Phase 7:
-void Scheduler::TransformLoop() {
-  TRACE("--- Loop Transform -------------------------------------------\n");
-
-  // Build a control-flow graph for the main control-connected component
-  // that is being spanned by the graph's start and end nodes.
-  loop_transformer_ = new (zone_) LoopTransform(zone_, this);
-  loop_transformer_->Run();
+void Scheduler::AnalysisAndUpdateGraph() {
+  TRACE("--- %s -------------------------------------------\n", __func__);
+  loop_revectorizer_ = new (zone_) LoopRevectorizer(zone_, this);
+  loop_revectorizer_->SelectLoopAndUpdateGraph();
 }
 // Phase 7:
-void Scheduler::MarkTransform() {
-  TRACE("--- Loop Transform -------------------------------------------\n");
-  loop_transformer_->MarkBlockInLoop();
+void Scheduler::MarkBasicBlocks() {
+  TRACE("--- %s -------------------------------------------\n", __func__);
+  loop_revectorizer_->MarkBlocksInLoops();
 }
 
 #undef TRACE

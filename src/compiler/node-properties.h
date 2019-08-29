@@ -74,8 +74,8 @@ class V8_EXPORT_PRIVATE NodeProperties final {
   static bool IsPhi(Node* node) {
     return IrOpcode::IsPhiOpcode(node->opcode());
   }
-  static bool IsSIMD(Node* node) {
-    return IrOpcode::IsSIMDOpcode(node->opcode());
+  static bool IsSimd(Node* node) {
+    return IrOpcode::IsSimdOpcode(node->opcode());
   }
 
 

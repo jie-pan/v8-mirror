@@ -937,7 +937,7 @@ class V8_EXPORT_PRIVATE IrOpcode {
     return kJSCreateFunctionContext <= value && value <= kJSCreateBlockContext;
   }
 
-  static bool IsSIMDOpcode(Value value) {
+  static bool IsSimdOpcode(Value value) {
     return kF32x4Splat <= value && value <= kS1x16AllTrue;
   }
 };

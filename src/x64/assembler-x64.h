@@ -1329,7 +1329,7 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   AVX_3(instr##ps, opcode, vps) \
   AVX_3(instr##pd, opcode, vpd)
 
-//panjie, for 256bits
+// for 256bits avx instruction
 #define AVX_P_3_256(instr, opcode)  \
   AVX_3(instr##ps##256, opcode, vps256) \
   AVX_3(instr##pd##256, opcode, vpd256)
@@ -1356,7 +1356,7 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   AVX_3(vcvtsd2ss, 0x5a, vsd)
   AVX_3(vhaddps, 0x7c, vsd)
 
-  //panjie, 256
+  // 256 bits AVX
   AVX_P_3_256(vadd, 0x58)
   AVX_P_3_256(vsub, 0x5c)
 

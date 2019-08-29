@@ -4318,7 +4318,6 @@ void Assembler::vmovq(Register dst, XMMRegister src) {
   emit_sse_operand(src, dst);
 }
 
-//panjie
 void Assembler::vmovdqu(Operand dst, XMMRegister src)
 {
   DCHECK(IsEnabled(AVX));

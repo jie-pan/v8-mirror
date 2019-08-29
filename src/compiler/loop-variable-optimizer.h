@@ -41,7 +41,7 @@ class InductionVariable : public ZoneObject {
 
  private:
   friend class LoopVariableOptimizer;
-  friend class LoopTransform;
+  friend class LoopRevectorizer;
 
  protected:
   InductionVariable(Node* phi, Node* effect_phi, Node* arith, Node* increment,
@@ -68,18 +68,15 @@ class InductionVariable : public ZoneObject {
   ZoneVector<Bound> upper_bounds_;
   ArithmeticType arithmeticType_;
 };
-//panjie
 
 class IteratorVariable : public InductionVariable{
  public:
   Node* cond() const { return cond_; }
   Node* final_value() const { return final_value_; }
 
-
-
  private:
   friend class LoopVariableOptimizer;
-  friend class LoopTransform;
+  friend class LoopRevectorizer;
 
   IteratorVariable( Node* phi, Node* effect_phi, Node* arith, Node* increment,
                     Node* init_value, Zone* zone, ArithmeticType arithmeticType,
@@ -87,7 +84,6 @@ class IteratorVariable : public InductionVariable{
       :InductionVariable(phi, effect_phi, arith, increment, init_value, zone, arithmeticType),
        cond_(cond),
        final_value_(final_value) {}
-
 
   Node* cond_;
   Node* final_value_;

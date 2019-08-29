@@ -6412,11 +6412,11 @@ bool BuildGraphForWasmFunction(AccountingAllocator* allocator,
                        CreateMachineSignature(mcgraph->zone(), func_body.sig))
         .LowerGraph();
   }
-  //panjie TODO
+
   if (builder.has_simd())
   {
     mcgraph->graph()->SetSimd(true);
-    PrintF("panjie wasm function #%d has simd\n", func_index);
+    PrintF("wasm function #%d has simd\n", func_index);
   }
 
   if (func_index >= FLAG_trace_wasm_ast_start &&
