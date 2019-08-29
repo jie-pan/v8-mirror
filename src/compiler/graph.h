@@ -103,7 +103,7 @@ class V8_EXPORT_PRIVATE Graph final : public NON_EXPORTED_BASE(ZoneObject) {
   Mark mark_max_;
   NodeId next_node_id_;
   ZoneVector<GraphDecorator*> decorators_;
-  bool has_simd_ = false;
+  bool has_simd_;
   DISALLOW_COPY_AND_ASSIGN(Graph);
 };
 
