@@ -5,6 +5,7 @@
 #include "src/compiler/scheduler.h"
 
 #include <iomanip>
+#include <map>
 
 #include "src/base/adapters.h"
 #include "src/bit-vector.h"
@@ -15,6 +16,10 @@
 #include "src/compiler/node-properties.h"
 #include "src/compiler/node.h"
 #include "src/zone/zone-containers.h"
+
+#include "src/compiler/loop-analysis.h"
+#include "loop-variable-optimizer.h"
+
 
 namespace v8 {
 namespace internal {
@@ -52,6 +57,10 @@ Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags) {
       new (schedule_zone) Schedule(schedule_zone, node_count_hint);
   Scheduler scheduler(zone, graph, schedule, flags, node_count_hint);
 
+  if (FLAG_wasm_revec) {
+    scheduler.AnalysisAndUpdateGraph();
+  }
+
   scheduler.BuildCFG();
   scheduler.ComputeSpecialRPONumbering();
   scheduler.GenerateImmediateDominatorTree();
@@ -61,6 +70,10 @@ Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags) {
   scheduler.ScheduleLate();
 
   scheduler.SealFinalSchedule();
+
+  if (FLAG_wasm_revec) {
+    scheduler.MarkBasicBlocks();
+  }
 
   return schedule;
 }
@@ -1808,6 +1821,742 @@ void Scheduler::MovePlannedNodes(BasicBlock* from, BasicBlock* to) {
     std::swap(scheduled_nodes_[from->id().ToSize()],
               scheduled_nodes_[to->id().ToSize()]);
   }
+}
+
+class LoopRevectorizer : public ZoneObject {
+ public:
+  LoopRevectorizer(Zone* zone, Scheduler* scheduler)
+      : zone_(zone),
+        scheduler_(scheduler),
+        schedule_(scheduler->schedule_),
+        induction_vars_(zone),
+        iterator_vars_(zone),
+        use_count_(zone),
+        loop_tree_(nullptr) {
+    InitSupportedOpcode();
+  }
+
+  void InitSupportedOpcode() {
+    /*
+    supported_opcodes_.insert(IrOpcode::kF32x4Splat);
+    supported_opcodes_.insert(IrOpcode::kF32x4ExtractLane);
+    supported_opcodes_.insert(IrOpcode::kF32x4ReplaceLane);
+    supported_opcodes_.insert(IrOpcode::kF32x4SConvertI32x4);
+    supported_opcodes_.insert(IrOpcode::kF32x4UConvertI32x4);
+    supported_opcodes_.insert(IrOpcode::kF32x4Abs);
+    supported_opcodes_.insert(IrOpcode::kF32x4Neg);
+    supported_opcodes_.insert(IrOpcode::kF32x4RecipApprox);
+    supported_opcodes_.insert(IrOpcode::kF32x4RecipSqrtApprox);
+    */
+    supported_opcodes_.insert(IrOpcode::kF32x4Add);
+    // supported_opcodes_.insert(IrOpcode::kF32x4AddHoriz);
+    supported_opcodes_.insert(IrOpcode::kF32x4Sub);
+    supported_opcodes_.insert(IrOpcode::kF32x4Mul);
+    /*
+    supported_opcodes_.insert(IrOpcode::kF32x4Min);
+    supported_opcodes_.insert(IrOpcode::kF32x4Max);
+    supported_opcodes_.insert(IrOpcode::kF32x4Eq);
+    supported_opcodes_.insert(IrOpcode::kF32x4Ne);
+    supported_opcodes_.insert(IrOpcode::kF32x4Lt);
+    supported_opcodes_.insert(IrOpcode::kF32x4Le);
+    supported_opcodes_.insert(IrOpcode::kF32x4Gt);
+    supported_opcodes_.insert(IrOpcode::kF32x4Ge);
+    */
+    /*
+    supported_opcodes_.insert(IrOpcode::kI32x4Splat);
+    supported_opcodes_.insert(IrOpcode::kI32x4ExtractLane);
+    supported_opcodes_.insert(IrOpcode::kI32x4ReplaceLane);
+    supported_opcodes_.insert(IrOpcode::kI32x4SConvertF32x4);
+    supported_opcodes_.insert(IrOpcode::kI32x4SConvertI16x8Low);
+    supported_opcodes_.insert(IrOpcode::kI32x4SConvertI16x8High);
+    supported_opcodes_.insert(IrOpcode::kI32x4Neg);
+    supported_opcodes_.insert(IrOpcode::kI32x4Shl);
+    supported_opcodes_.insert(IrOpcode::kI32x4ShrS);
+    supported_opcodes_.insert(IrOpcode::kI32x4Add);
+    supported_opcodes_.insert(IrOpcode::kI32x4AddHoriz);
+    supported_opcodes_.insert(IrOpcode::kI32x4Sub);
+    supported_opcodes_.insert(IrOpcode::kI32x4Mul);
+    supported_opcodes_.insert(IrOpcode::kI32x4MinS);
+    supported_opcodes_.insert(IrOpcode::kI32x4MaxS);
+    supported_opcodes_.insert(IrOpcode::kI32x4Eq);
+    supported_opcodes_.insert(IrOpcode::kI32x4Ne);
+    supported_opcodes_.insert(IrOpcode::kI32x4LtS);
+    supported_opcodes_.insert(IrOpcode::kI32x4LeS);
+    supported_opcodes_.insert(IrOpcode::kI32x4GtS);
+    supported_opcodes_.insert(IrOpcode::kI32x4GeS);
+    supported_opcodes_.insert(IrOpcode::kI32x4UConvertF32x4);
+    supported_opcodes_.insert(IrOpcode::kI32x4UConvertI16x8Low);
+    supported_opcodes_.insert(IrOpcode::kI32x4UConvertI16x8High);
+    supported_opcodes_.insert(IrOpcode::kI32x4ShrU);
+    supported_opcodes_.insert(IrOpcode::kI32x4MinU);
+    supported_opcodes_.insert(IrOpcode::kI32x4MaxU);
+    supported_opcodes_.insert(IrOpcode::kI32x4LtU);
+    supported_opcodes_.insert(IrOpcode::kI32x4LeU);
+    supported_opcodes_.insert(IrOpcode::kI32x4GtU);
+    supported_opcodes_.insert(IrOpcode::kI32x4GeU);
+    supported_opcodes_.insert(IrOpcode::kI16x8Splat);
+    supported_opcodes_.insert(IrOpcode::kI16x8ExtractLane);
+    supported_opcodes_.insert(IrOpcode::kI16x8ReplaceLane);
+    supported_opcodes_.insert(IrOpcode::kI16x8SConvertI8x16Low);
+    supported_opcodes_.insert(IrOpcode::kI16x8SConvertI8x16High);
+    supported_opcodes_.insert(IrOpcode::kI16x8Neg);
+    supported_opcodes_.insert(IrOpcode::kI16x8Shl);
+    supported_opcodes_.insert(IrOpcode::kI16x8ShrS);
+    supported_opcodes_.insert(IrOpcode::kI16x8SConvertI32x4);
+    supported_opcodes_.insert(IrOpcode::kI16x8Add);
+    supported_opcodes_.insert(IrOpcode::kI16x8AddSaturateS);
+    supported_opcodes_.insert(IrOpcode::kI16x8AddHoriz);
+    supported_opcodes_.insert(IrOpcode::kI16x8Sub);
+    supported_opcodes_.insert(IrOpcode::kI16x8SubSaturateS);
+    supported_opcodes_.insert(IrOpcode::kI16x8Mul);
+    supported_opcodes_.insert(IrOpcode::kI16x8MinS);
+    supported_opcodes_.insert(IrOpcode::kI16x8MaxS);
+    supported_opcodes_.insert(IrOpcode::kI16x8Eq);
+    supported_opcodes_.insert(IrOpcode::kI16x8Ne);
+    supported_opcodes_.insert(IrOpcode::kI16x8LtS);
+    supported_opcodes_.insert(IrOpcode::kI16x8LeS);
+    supported_opcodes_.insert(IrOpcode::kI16x8GtS);
+    supported_opcodes_.insert(IrOpcode::kI16x8GeS);
+    supported_opcodes_.insert(IrOpcode::kI16x8UConvertI8x16Low);
+    supported_opcodes_.insert(IrOpcode::kI16x8UConvertI8x16High);
+    supported_opcodes_.insert(IrOpcode::kI16x8ShrU);
+    supported_opcodes_.insert(IrOpcode::kI16x8UConvertI32x4);
+    supported_opcodes_.insert(IrOpcode::kI16x8AddSaturateU);
+    supported_opcodes_.insert(IrOpcode::kI16x8SubSaturateU);
+    supported_opcodes_.insert(IrOpcode::kI16x8MinU);
+    supported_opcodes_.insert(IrOpcode::kI16x8MaxU);
+    supported_opcodes_.insert(IrOpcode::kI16x8LtU);
+    supported_opcodes_.insert(IrOpcode::kI16x8LeU);
+    supported_opcodes_.insert(IrOpcode::kI16x8GtU);
+    supported_opcodes_.insert(IrOpcode::kI16x8GeU);
+    supported_opcodes_.insert(IrOpcode::kI8x16Splat);
+    supported_opcodes_.insert(IrOpcode::kI8x16ExtractLane);
+    supported_opcodes_.insert(IrOpcode::kI8x16ReplaceLane);
+    supported_opcodes_.insert(IrOpcode::kI8x16SConvertI16x8);
+    supported_opcodes_.insert(IrOpcode::kI8x16Neg);
+    supported_opcodes_.insert(IrOpcode::kI8x16Shl);
+    supported_opcodes_.insert(IrOpcode::kI8x16ShrS);
+    supported_opcodes_.insert(IrOpcode::kI8x16Add);
+    supported_opcodes_.insert(IrOpcode::kI8x16AddSaturateS);
+    supported_opcodes_.insert(IrOpcode::kI8x16Sub);
+    supported_opcodes_.insert(IrOpcode::kI8x16SubSaturateS);
+    supported_opcodes_.insert(IrOpcode::kI8x16Mul);
+    supported_opcodes_.insert(IrOpcode::kI8x16MinS);
+    supported_opcodes_.insert(IrOpcode::kI8x16MaxS);
+    supported_opcodes_.insert(IrOpcode::kI8x16Eq);
+    supported_opcodes_.insert(IrOpcode::kI8x16Ne);
+    supported_opcodes_.insert(IrOpcode::kI8x16LtS);
+    supported_opcodes_.insert(IrOpcode::kI8x16LeS);
+    supported_opcodes_.insert(IrOpcode::kI8x16GtS);
+    supported_opcodes_.insert(IrOpcode::kI8x16GeS);
+    supported_opcodes_.insert(IrOpcode::kI8x16UConvertI16x8);
+    supported_opcodes_.insert(IrOpcode::kI8x16AddSaturateU);
+    supported_opcodes_.insert(IrOpcode::kI8x16SubSaturateU);
+    supported_opcodes_.insert(IrOpcode::kI8x16ShrU);
+    supported_opcodes_.insert(IrOpcode::kI8x16MinU);
+    supported_opcodes_.insert(IrOpcode::kI8x16MaxU);
+    supported_opcodes_.insert(IrOpcode::kI8x16LtU);
+    supported_opcodes_.insert(IrOpcode::kI8x16LeU);
+    supported_opcodes_.insert(IrOpcode::kI8x16GtU);
+    */
+    supported_opcodes_.insert(IrOpcode::kI8x16GeU);
+    /*
+    supported_opcodes_.insert(IrOpcode::kS128Load);
+    supported_opcodes_.insert(IrOpcode::kS128Store);
+    supported_opcodes_.insert(IrOpcode::kS128Zero);
+    supported_opcodes_.insert(IrOpcode::kS128Not);
+    supported_opcodes_.insert(IrOpcode::kS128And);
+    supported_opcodes_.insert(IrOpcode::kS128Or);
+    supported_opcodes_.insert(IrOpcode::kS128Xor);
+    supported_opcodes_.insert(IrOpcode::kS128Select);
+    supported_opcodes_.insert(IrOpcode::kS8x16Shuffle);
+    supported_opcodes_.insert(IrOpcode::kS1x4AnyTrue);
+    supported_opcodes_.insert(IrOpcode::kS1x4AllTrue);
+    supported_opcodes_.insert(IrOpcode::kS1x8AnyTrue);
+    supported_opcodes_.insert(IrOpcode::kS1x8AllTrue);
+    supported_opcodes_.insert(IrOpcode::kS1x16AnyTrue);
+    supported_opcodes_.insert(IrOpcode::kS1x16AllTrue);
+    */
+  }
+  bool HasUnsupportedOpcode(LoopTree::Loop* loop) {
+    bool has_simd = false;
+    for (Node* node : loop_tree_->LoopNodes(loop)) {
+      if (NodeProperties::IsSimd(node)) {
+        has_simd = true;
+
+        TRACE("revec--- found simd node #%d:%s\n", node->id(),
+              node->op()->mnemonic());
+        if (supported_opcodes_.find(node->opcode()) ==
+            supported_opcodes_.end()) {
+          TRACE("revec--- unsupported simd node #%d:%s\n", node->id(),
+                node->op()->mnemonic());
+          return true;
+        }
+      }
+    }
+    return !has_simd;
+  }
+
+  // every loop has at least 1 call(Stack Check)
+  bool HasFunctionCall(LoopTree::Loop* loop) {
+    // TODO, don't check call count, check call parameter
+    int call_count = 0;
+    for (Node* node : loop_tree_->LoopNodes(loop)) {
+      if (node->opcode() == IrOpcode::kCall) {
+        call_count++;
+      }
+    }
+    if (call_count > 1) {
+      TRACE("revec--- call count > 1 \n");
+    }
+    return call_count > 1;
+  }
+
+  bool IsSupportedConstNode(Node* incr) {
+    if (incr->opcode() == IrOpcode::kInt32Constant ||
+        incr->opcode() == IrOpcode::kInt64Constant) {
+      return true;
+    }
+
+    return false;
+  }
+
+  // TODO common constant node
+  bool UnsupportedInductionVariables(LoopTree::Loop* loop) {
+    for (Node* node : loop_tree_->HeaderNodes(loop)) {
+      if (NodeProperties::IsPhi(node)) {
+        auto it = induction_vars_.find(node->id());
+        if (it != induction_vars_.end()) {
+          InductionVariable* var = it->second;
+          Node* incr = var->increment();
+          if (!IsSupportedConstNode(incr)) {
+            return true;
+          }
+
+          auto search = use_count_.find(incr->id());
+          if (search != use_count_.end()) {
+            use_count_[incr->id()] += 1;
+          } else {
+            use_count_[incr->id()] = 1;
+          }
+        }
+      }
+    }
+
+    // OwnedBy()
+    for (Node* node : loop_tree_->HeaderNodes(loop)) {
+      if (NodeProperties::IsPhi(node)) {
+        auto it = induction_vars_.find(node->id());
+        if (it != induction_vars_.end()) {
+          InductionVariable* var = it->second;
+          Node* incr = var->increment();
+          if (incr->UseCount() != use_count_[incr->id()]) {
+            TRACE("revec--- node %i use = %d != %d\n", incr->id(),
+                  incr->UseCount(), use_count_[incr->id()]);
+            TRACE("revec--- use node:");
+            for (Edge const edge : incr->use_edges()) {
+              // if (!IsValueEdge(edge))
+              // continue;
+              Node* use = edge.from();
+              TRACE(" %d", use->id());
+            }
+            TRACE("\n");
+
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  bool SatifyConstIteratorCheck(IteratorVariable* var) {
+    Node* init = var->init_value();
+    Node* incr = var->increment();
+    Node* final = var->final_value();
+    int64_t init_value = 0;
+    int64_t incr_value = 0;
+    int64_t final_value = 0;
+
+    Node* cond = var->cond();
+    IrOpcode::Value op = var->cond()->opcode();
+
+    int64_t iterator_count = 0;
+
+    if (init->opcode() == IrOpcode::kInt32Constant &&
+        incr->opcode() == IrOpcode::kInt32Constant &&
+        final->opcode() == IrOpcode::kInt32Constant) {
+      init_value = OpParameter<int32_t>(init->op());
+      incr_value = OpParameter<int32_t>(incr->op());
+      final_value = OpParameter<int32_t>(final->op());
+    } else if (init->opcode() == IrOpcode::kInt64Constant &&
+               incr->opcode() == IrOpcode::kInt64Constant &&
+               final->opcode() == IrOpcode::kInt64Constant) {
+      init_value = OpParameter<int64_t>(init->op());
+      incr_value = OpParameter<int64_t>(incr->op());
+      final_value = OpParameter<int64_t>(final->op());
+    } else {
+      return false;
+    }
+
+    if (incr_value == 0) {
+      return false;
+    }
+
+    if (incr_value > 0) {
+      /*
+            if (cond->InputAt(1) != final) {
+              return false;
+            }
+      */
+      // TODO
+      int64_t trip_count = (final_value - init_value) / incr_value;
+      int64_t reminder = (final_value - init_value) % incr_value;
+      if (trip_count < 8) {
+        return false;
+      }
+
+      if (op == IrOpcode::kWord32Equal || op == IrOpcode::kWord64Equal) {
+        if (reminder == 0 && (trip_count & 1) == 0) {
+          return true;
+        }
+      } else if (op == IrOpcode::kInt32LessThan ||
+                 op == IrOpcode::kInt64LessThan) {
+        if (reminder != 0) {
+          trip_count++;
+        }
+        if ((trip_count & 1) == 0) {
+          return true;
+        }
+      } else if (op == IrOpcode::kInt32LessThanOrEqual) {  // overrun
+      }
+    } else {  //<0 only, =0 is exclude
+
+      int64_t trip_count = (init_value - final_value) / (-incr_value);
+      int64_t reminder = (init_value - final_value) % (-incr_value);
+      if (trip_count < 8) {
+        return false;
+      }
+      /*
+            if (cond->InputAt(0) != final) {
+              return false;
+            }
+      */
+      if (op == IrOpcode::kWord32Equal || op == IrOpcode::kWord64Equal) {
+        if (reminder == 0 && (trip_count & 1) == 0) {
+          return true;
+        }
+      } else if (op == IrOpcode::kInt32LessThan ||
+                 op == IrOpcode::kInt64LessThan) {
+        if (final_value == (-incr_value) - 1) {
+          return true;
+        } else {
+          if (reminder != 0) {
+            trip_count++;
+          }
+          if ((trip_count & 1) == 0) {
+            return true;
+          }
+        }
+      } else if (op == IrOpcode::kInt32LessThanOrEqual ||
+                 op == IrOpcode::kInt64LessThanOrEqual) {
+        if (final_value == (-incr_value)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  bool SatifyIteratorCheck(IteratorVariable* var) {
+    Node* init = var->init_value();
+    Node* incr = var->increment();
+    Node* final = var->final_value();
+
+    if (NodeProperties::IsConstant(init) && NodeProperties::IsConstant(incr) &&
+        NodeProperties::IsConstant(final)) {
+      return SatifyConstIteratorCheck(var);
+    }
+    return false;
+  }
+
+  bool UnsupportedMainIterator(LoopTree::Loop* loop) {
+    int count = 0;
+    for (Node* node : loop_tree_->HeaderNodes(loop)) {
+      if (NodeProperties::IsPhi(node)) {
+        auto it = iterator_vars_.find(node->id());
+        if (it != iterator_vars_.end()) {
+          count++;
+          IteratorVariable* var = it->second;
+          if (!SatifyIteratorCheck(var)) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return count != 1;
+  }
+
+  bool HasMemoryDependency() { return false; }
+
+  // TODO handle ReductionVariable
+  bool HasOutsideDependency(LoopTree::Loop* loop) {
+    // check input
+    for (Node* node : loop_tree_->LoopNodes(loop)) {
+      for (Node* input : node->inputs()) {
+        if (!loop_tree_->Contains(loop, input)) {  // input of nodes outside loop
+          if (NodeProperties::IsSimd(input)) {
+            return true;
+          }
+        }
+      }
+    }
+    // check uses
+    for (Node* node : loop_tree_->LoopNodes(loop)) {
+      for (Node* use : node->uses()) {
+        if (!loop_tree_->Contains(loop, use)) {  // use of nodes outside loop
+          if (NodeProperties::IsSimd(use)) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  bool HasMultipleOutput(LoopTree::Loop* loop) {
+    Node* loop_node = loop_tree_->GetLoopControl(loop);
+    int backedges = loop_node->InputCount() - 1;
+    if (backedges > 1) {
+      return true;
+    }
+    return false;
+  }
+
+  bool CanVectorize(LoopTree::Loop* loop) {
+    if (HasMultipleOutput(loop)) {
+      TRACE("revec--- HasMultipleOutput return\n");
+      return false;
+    }
+    if (HasUnsupportedOpcode(loop)) {
+      TRACE("revec--- HasUnsupportedOpcode return\n");
+      return false;
+    }
+    if (HasFunctionCall(loop)) {
+      TRACE("revec--- HasFunctionCall return\n");
+      return false;
+    }
+    if (UnsupportedInductionVariables(loop)) {
+      TRACE("revec--- CheckInductionVariables return\n");
+      return false;
+    }
+    if (UnsupportedMainIterator(loop)) {
+      TRACE("revec--- CheckMainIterator return\n");
+      return false;
+    }
+    if (HasOutsideDependency(loop)) {
+      TRACE("revec--- HasOutsizeDependency return\n");
+      return false;
+    }
+
+    // TODO
+    if (HasMemoryDependency()) {
+      TRACE("revec--- HasMemoryDependency return");
+      return false;
+    }
+
+    return true;
+  }
+  //////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////
+
+  // mark for sse-avx convert
+  BasicBlock* BasicBlockForLoopHeader(LoopTree::Loop* loop) {
+    Node* loop_node = loop_tree_->GetLoopControl(loop);
+
+    BasicBlock* header = nullptr;
+
+    BasicBlockVector* blocks = schedule_->rpo_order();
+    for (auto const block : *blocks) {
+      if (block->IsLoopHeader()) {
+        DCHECK_LE(2u, block->PredecessorCount());
+
+        for (Node* const node : *block) {
+          if (node->opcode() == IrOpcode::kLoop && node == loop_node) {
+            header = block;
+            TRACE("revec--- block id:%d for loop node #%d:%s\n",
+                  header->rpo_number(), node->id(), node->op()->mnemonic());
+            return header;
+          }
+        }
+      }
+    }
+    return header;
+  }
+
+  void MarkBlocksInLoop(LoopTree::Loop* loop) {
+    BasicBlockVector* blocks = schedule_->rpo_order();
+
+    BasicBlock* header = BasicBlockForLoopHeader(loop);
+    if(header != nullptr)
+    {
+      for (auto block : *blocks) {
+        if (header->LoopContains(block)) {
+          TRACE("revec--- mark block id:%d for loop convert\n",
+                block->rpo_number());
+          block->set_need_convert(true);
+        }
+      }
+    }
+  }
+
+  // node->param = node->param * multiplier + addend
+  void TransformConstantNode(Node* node, int multiplier, int addend) {
+    if (!IsSupportedConstNode(node)) {
+      TRACE("revec--- can't double non-const node\n");
+      return;
+    }
+
+    if (node->opcode() == IrOpcode::kInt32Constant) {
+      Operator1<int32_t>* op1 = (Operator1<int32_t>*)(node->op());
+      int32_t value = op1->parameter();
+      op1->SetParameter(value * multiplier + addend);
+
+    } else if (node->opcode() == IrOpcode::kInt64Constant) {
+      Operator1<int64_t>* op1 = (Operator1<int64_t>*)(node->op());
+      int64_t value = op1->parameter();
+      op1->SetParameter(value * multiplier + addend);
+    } else {
+      TRACE("revec--- Int64 and Int32 const only!, unimplement\n");
+    }
+  }
+
+  void UpdateInductionStride(LoopTree::Loop* loop) {
+    std::set<int> used;
+    for (Node* node : loop_tree_->HeaderNodes(loop)) {
+      if (NodeProperties::IsPhi(node)) {
+        auto it = induction_vars_.find(node->id());
+        if (it != induction_vars_.end()) {
+          InductionVariable* var = it->second;
+          Node* incr = var->increment();
+          if (IsSupportedConstNode(incr)) {
+            if (used.find(incr->id()) == used.end()) {
+              TRACE("revec--- double constant node %d\n", incr->id());
+              TransformConstantNode(incr, 2, 0);
+              used.insert(incr->id());
+            }
+          }
+          else {
+            TRACE("revec--- Update Stride failed\n");
+          }
+        }
+      }
+    }
+  }
+
+  void UpdateGraph(LoopTree::Loop* loop) {
+    //UpdateIterator(loop);
+    UpdateInductionStride(loop);
+  }
+
+  void ReVectorizeIfPossible(LoopTree::Loop* loop) {
+    Node* loop_node = loop_tree_->GetLoopControl(loop);
+
+    TRACE("revec--- +++ gather info for loop %i:\n", loop_node->id());
+    DetectInductionVariables(loop_node);
+    DetectMainIterator(loop_node);
+    if (CanVectorize(loop)) {
+      selected_loop_.insert(loop);
+      UpdateGraph(loop);
+      TRACE("revec--- +++ finish revec loop %i:\n\n", loop_node->id());
+    } else {
+      TRACE("revec--- +++ can't revec loop %i:\n\n", loop_node->id());
+    }
+  }
+
+  void ReVectorizeInnerLoops(LoopTree::Loop* loop) {
+    // If the loop has nested loops, revectorize inside those.
+    if (!loop->children().empty()) {
+      for (LoopTree::Loop* inner_loop : loop->children()) {
+        ReVectorizeInnerLoops(inner_loop);
+      }
+      return;
+    }
+    // Only revectorize small-enough loops.
+    if (loop->TotalSize() > kMaxLoopNodes) return;
+    if (FLAG_trace_turbo_loop) {
+      PrintF("revec Vectorize loop with header: ");
+      for (Node* node : loop_tree_->HeaderNodes(loop)) {
+        PrintF("%i ", node->id());
+      }
+      PrintF("\n");
+    }
+
+    ReVectorizeIfPossible(loop);  // entry
+  }
+
+  void SelectLoopAndUpdateGraph() {
+    if (!scheduler_->graph_->HasSimd()) {
+      return;
+    }
+
+    loop_tree_ = LoopFinder::BuildLoopTree(scheduler_->graph_, zone_);
+    for (LoopTree::Loop* loop : loop_tree_->outer_loops()) {
+      ReVectorizeInnerLoops(loop);
+    }
+  }
+
+  void MarkBlocksInLoops() {
+    for (auto it = selected_loop_.begin();
+         it != selected_loop_.end(); ++it) {
+      MarkBlocksInLoop(*it);
+    }
+  }
+
+  InductionVariable* TryGetInductionVariable(Node* phi) {
+    DCHECK_EQ(2, phi->op()->ValueInputCount());
+    Node* loop = NodeProperties::GetControlInput(phi);
+    DCHECK_EQ(IrOpcode::kLoop, loop->opcode());
+    Node* initial = phi->InputAt(0);
+    Node* arith = phi->InputAt(1);
+    InductionVariable::ArithmeticType arithmeticType;
+
+    if (arith->opcode() == IrOpcode::kInt32Add ||
+        arith->opcode() == IrOpcode::kInt64Add ||
+        arith->opcode() == IrOpcode::kFloat32Add ||
+        arith->opcode() == IrOpcode::kFloat64Add) {
+      arithmeticType = InductionVariable::ArithmeticType::kAddition;
+    } else if (arith->opcode() == IrOpcode::kInt32Sub ||
+               arith->opcode() == IrOpcode::kInt64Sub ||
+               arith->opcode() == IrOpcode::kFloat32Sub ||
+               arith->opcode() == IrOpcode::kFloat64Sub) {
+      arithmeticType = InductionVariable::ArithmeticType::kSubtraction;
+    } else {
+      return nullptr;
+    }
+
+    // TODO(jarin) Support both sides.
+    Node* input = arith->InputAt(0);
+
+    if (input != phi) return nullptr;
+
+    Node* effect_phi = nullptr;
+    for (Node* use : loop->uses()) {
+      if (use->opcode() == IrOpcode::kEffectPhi) {
+        DCHECK_NULL(effect_phi);
+        effect_phi = use;
+      }
+    }
+    if (!effect_phi) return nullptr;
+
+    Node* incr = arith->InputAt(1);
+
+    TRACE(
+        "revec--- induction var: phi %i, effect_phi %i, arith %i, incr "
+        "%i, "
+        "init %i, type %i 0add 1sub\n",
+        phi->id(), effect_phi->id(), arith->id(), incr->id(), initial->id(),
+        arithmeticType);
+    return new (schedule_->zone())
+        InductionVariable(phi, effect_phi, arith, incr, initial,
+                          schedule_->zone(), arithmeticType);
+  }
+
+  void DetectInductionVariables(Node* loop) {
+    if (loop->op()->ControlInputCount() != 2) return;
+    TRACE("revec--- Loop variables for loop %i:\n", loop->id());
+    for (Edge edge : loop->use_edges()) {
+      if (NodeProperties::IsControlEdge(edge) &&
+          edge.from()->opcode() == IrOpcode::kPhi) {
+        Node* phi = edge.from();
+        InductionVariable* induction_var = TryGetInductionVariable(phi);
+        if (induction_var) {
+          induction_vars_[phi->id()] = induction_var;
+        }
+      }
+    }
+  }
+
+  void DetectMainIterator(Node* loop) {
+    if (loop->op()->ControlInputCount() != 2) return;
+
+    TRACE("revec--- Loop Count for loop %i\n", loop->id());
+    int max = NodeProperties::PastControlIndex(loop);
+    for (int i = NodeProperties::FirstControlIndex(loop); i < max; i++) {
+      Node* input = loop->InputAt(i);
+      if (input->opcode() == IrOpcode::kIfFalse ||
+          input->opcode() == IrOpcode::kIfTrue) {
+        VisitIf(input, true);
+      }
+    }
+  }
+
+  void VisitIf(Node* node, bool polarity) {
+    Node* branch = node->InputAt(0);
+    Node* cond = branch->InputAt(0);
+    if (cond->opcode() == IrOpcode::kWord32Equal) {
+      if (cond->InputAt(0)->opcode() == IrOpcode::kWord32Equal) {
+        cond = cond->InputAt(0);
+      }
+    } else if (cond->opcode() == IrOpcode::kWord64Equal) {
+      if (cond->InputAt(0)->opcode() == IrOpcode::kWord64Equal) {
+        cond = cond->InputAt(0);
+      }
+    }
+
+    Node* left = cond->InputAt(0);
+    Node* right = cond->InputAt(1);
+    for (auto entry : induction_vars_) {
+      Node* final_value = nullptr;
+      InductionVariable* induction_var = entry.second;
+      if (induction_var->arith() == left) {
+        final_value = right;
+      } else if (induction_var->arith() == right) {
+        final_value = left;
+      }
+
+      if (final_value != nullptr) {
+        IteratorVariable* iterator_var = new (schedule_->zone())
+            IteratorVariable(induction_var->phi(), induction_var->effect_phi(),
+                             induction_var->arith(), induction_var->increment(),
+                             induction_var->init_value(), schedule_->zone(),
+                             induction_var->Type(), cond, final_value);
+
+        iterator_vars_[induction_var->phi()->id()] = iterator_var;
+        TRACE("revec--- found main induction_var %i\n",
+              induction_var->phi()->id());
+      }
+    }
+  }
+
+ private:
+  Zone* zone_;
+  Scheduler* scheduler_;
+  Schedule* schedule_;
+  ZoneMap<int, InductionVariable*> induction_vars_;
+  ZoneMap<int, IteratorVariable*> iterator_vars_;
+  ZoneMap<int, int> use_count_;
+
+  LoopTree* loop_tree_;
+  std::set<IrOpcode::Value> supported_opcodes_;
+  std::set<LoopTree::Loop*> selected_loop_;
+  static const size_t kMaxLoopNodes = 1000;
+};
+
+// -----------------------------------------------------------------------------
+// Phase 7:
+void Scheduler::AnalysisAndUpdateGraph() {
+  TRACE("--- %s -------------------------------------------\n", __func__);
+  loop_revectorizer_ = new (zone_) LoopRevectorizer(zone_, this);
+  loop_revectorizer_->SelectLoopAndUpdateGraph();
+}
+// Phase 7:
+void Scheduler::MarkBasicBlocks() {
+  TRACE("--- %s -------------------------------------------\n", __func__);
+  loop_revectorizer_->MarkBlocksInLoops();
 }
 
 #undef TRACE

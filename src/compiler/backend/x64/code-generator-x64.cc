@@ -726,7 +726,7 @@ void CodeGenerator::AssembleRegisterArgumentPoisoning() {
 
 // Assembles an instruction after register allocation, producing machine code.
 CodeGenerator::CodeGenResult CodeGenerator::AssembleArchInstruction(
-    Instruction* instr) {
+    Instruction* instr, bool need_convert) {
   X64OperandConverter i(this, instr);
   InstructionCode opcode = instr->opcode();
   ArchOpcode arch_opcode = ArchOpcodeField::decode(opcode);
@@ -2040,11 +2040,21 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleArchInstruction(
       CpuFeatureScope sse_scope(tasm(), SSSE3);
       EmitOOLTrapIfNeeded(zone(), this, opcode, instr, i, __ pc_offset());
       if (instr->HasOutput()) {
-        __ movdqu(i.OutputSimd128Register(), i.MemoryOperand());
+        if(need_convert) {
+          __ vmovdqu256(i.OutputSimd128Register(), i.MemoryOperand());
+        }
+        else {
+          __ movdqu(i.OutputSimd128Register(), i.MemoryOperand());
+        }
       } else {
         size_t index = 0;
         Operand operand = i.MemoryOperand(&index);
-        __ movdqu(operand, i.InputSimd128Register(index));
+        if(need_convert) {
+          __ vmovdqu256(operand, i.InputSimd128Register(index));
+        }
+        else {
+          __ movdqu(operand, i.InputSimd128Register(index));
+        }
       }
       break;
     }
@@ -2323,7 +2333,15 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleArchInstruction(
     }
     case kX64F32x4Add: {
       DCHECK_EQ(i.OutputSimd128Register(), i.InputSimd128Register(0));
-      __ addps(i.OutputSimd128Register(), i.InputSimd128Register(1));
+      if(need_convert)
+      {
+        __ addps256(i.OutputSimd128Register(), i.InputSimd128Register(1));
+      }
+      else
+      {
+
+        __ addps(i.OutputSimd128Register(), i.InputSimd128Register(1));
+      }
       break;
     }
     case kX64F32x4AddHoriz: {
@@ -3007,8 +3025,15 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleArchInstruction(
       CpuFeatureScope sse_scope(tasm(), SSE4_1);
       XMMRegister dst = i.OutputSimd128Register();
       XMMRegister src = i.InputSimd128Register(1);
-      __ pminub(dst, src);
-      __ pcmpeqb(dst, src);
+      if(need_convert) {
+          __ vpminub256(dst, dst, src);
+          __ vpcmpeqb256(dst, dst, src);
+      }
+      else {
+          __ pminub(dst, src);
+          __ pcmpeqb(dst, src);
+      }
+
       break;
     }
     case kX64S128And: {
