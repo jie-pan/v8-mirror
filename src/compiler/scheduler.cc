@@ -17,9 +17,9 @@
 #include "src/compiler/node.h"
 #include "src/zone/zone-containers.h"
 
+#include "src/compiler/loop-analysis.h"
 #include "loop-variable-optimizer.h"
 
-#include "src/compiler/loop-analysis.h"
 
 namespace v8 {
 namespace internal {
@@ -58,7 +58,7 @@ Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags,
       new (schedule_zone) Schedule(schedule_zone, node_count_hint);
   Scheduler scheduler(zone, graph, schedule, flags, node_count_hint);
 
-  if (FLAG_wasm_revec) {
+  if (FLAG_wasm_revec && graph->HasSimd()) {
     if (function_name != NULL) {
       TRACE("revec--- function %s ", function_name);
     }
@@ -75,7 +75,7 @@ Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags,
 
   scheduler.SealFinalSchedule();
 
-  if (FLAG_wasm_revec) {
+  if (FLAG_wasm_revec && graph->HasSimd()) {
     scheduler.MarkBasicBlocks();
   }
 
@@ -2632,10 +2632,6 @@ V(Float64LessThanOrEqual)
   }
 
   void SelectLoopAndUpdateGraph() {
-    if (!scheduler_->graph_->HasSimd()) {
-      return;
-    }
-
     loop_tree_ = LoopFinder::BuildLoopTree(scheduler_->graph_, zone_);
     for (LoopTree::Loop* loop : loop_tree_->outer_loops()) {
       ReVectorizeInnerLoops(loop);
