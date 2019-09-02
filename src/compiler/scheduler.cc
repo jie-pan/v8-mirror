@@ -30,10 +30,11 @@ namespace compiler {
     if (FLAG_trace_turbo_scheduler) PrintF(__VA_ARGS__); \
   } while (false)
 
-Scheduler::Scheduler(Zone* zone, Graph* graph, Schedule* schedule, Flags flags,
+Scheduler::Scheduler(Zone* zone, Graph* graph, MachineGraph* mcgraph, Schedule* schedule, Flags flags,
                      size_t node_count_hint)
     : zone_(zone),
       graph_(graph),
+      mcgraph_(mcgraph),
       schedule_(schedule),
       flags_(flags),
       scheduled_nodes_(zone),
@@ -44,7 +45,7 @@ Scheduler::Scheduler(Zone* zone, Graph* graph, Schedule* schedule, Flags flags,
   node_data_.resize(graph->NodeCount(), DefaultSchedulerData());
 }
 
-Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags,
+Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags, MachineGraph* mcgraph,
                                      char* function_name) {
   Zone* schedule_zone =
       (flags & Scheduler::kTempSchedule) ? zone : graph->zone();
@@ -56,7 +57,7 @@ Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags,
 
   Schedule* schedule =
       new (schedule_zone) Schedule(schedule_zone, node_count_hint);
-  Scheduler scheduler(zone, graph, schedule, flags, node_count_hint);
+  Scheduler scheduler(zone, graph, mcgraph, schedule, flags, node_count_hint);
 
   if (FLAG_wasm_revec && graph->HasSimd()) {
     if (function_name != NULL) {
@@ -1837,153 +1838,9 @@ class LoopRevectorizer : public ZoneObject {
         schedule_(scheduler->schedule_),
         induction_vars_(zone),
         iterator_vars_(zone),
-        use_count_(zone),
         loop_tree_(nullptr) {
-    InitSupportedOpcode();
   }
 
-  void InitSupportedOpcode() {
-    /*
-    supported_opcodes_.insert(IrOpcode::kF32x4Splat);
-    supported_opcodes_.insert(IrOpcode::kF32x4ExtractLane);
-    supported_opcodes_.insert(IrOpcode::kF32x4ReplaceLane);
-    supported_opcodes_.insert(IrOpcode::kF32x4SConvertI32x4);
-    supported_opcodes_.insert(IrOpcode::kF32x4UConvertI32x4);
-    supported_opcodes_.insert(IrOpcode::kF32x4Abs);
-    supported_opcodes_.insert(IrOpcode::kF32x4Neg);
-    supported_opcodes_.insert(IrOpcode::kF32x4RecipApprox);
-    supported_opcodes_.insert(IrOpcode::kF32x4RecipSqrtApprox);
-    */
-    supported_opcodes_.insert(IrOpcode::kF32x4Add);
-    // supported_opcodes_.insert(IrOpcode::kF32x4AddHoriz);
-    supported_opcodes_.insert(IrOpcode::kF32x4Sub);
-    supported_opcodes_.insert(IrOpcode::kF32x4Mul);
-    /*
-    supported_opcodes_.insert(IrOpcode::kF32x4Min);
-    supported_opcodes_.insert(IrOpcode::kF32x4Max);
-    supported_opcodes_.insert(IrOpcode::kF32x4Eq);
-    supported_opcodes_.insert(IrOpcode::kF32x4Ne);
-    supported_opcodes_.insert(IrOpcode::kF32x4Lt);
-    supported_opcodes_.insert(IrOpcode::kF32x4Le);
-    supported_opcodes_.insert(IrOpcode::kF32x4Gt);
-    supported_opcodes_.insert(IrOpcode::kF32x4Ge);
-    */
-    /*
-    supported_opcodes_.insert(IrOpcode::kI32x4Splat);
-    supported_opcodes_.insert(IrOpcode::kI32x4ExtractLane);
-    supported_opcodes_.insert(IrOpcode::kI32x4ReplaceLane);
-    supported_opcodes_.insert(IrOpcode::kI32x4SConvertF32x4);
-    supported_opcodes_.insert(IrOpcode::kI32x4SConvertI16x8Low);
-    supported_opcodes_.insert(IrOpcode::kI32x4SConvertI16x8High);
-    supported_opcodes_.insert(IrOpcode::kI32x4Neg);
-    supported_opcodes_.insert(IrOpcode::kI32x4Shl);
-    supported_opcodes_.insert(IrOpcode::kI32x4ShrS);
-    supported_opcodes_.insert(IrOpcode::kI32x4Add);
-    supported_opcodes_.insert(IrOpcode::kI32x4AddHoriz);
-    supported_opcodes_.insert(IrOpcode::kI32x4Sub);
-    supported_opcodes_.insert(IrOpcode::kI32x4Mul);
-    supported_opcodes_.insert(IrOpcode::kI32x4MinS);
-    supported_opcodes_.insert(IrOpcode::kI32x4MaxS);
-    supported_opcodes_.insert(IrOpcode::kI32x4Eq);
-    supported_opcodes_.insert(IrOpcode::kI32x4Ne);
-    supported_opcodes_.insert(IrOpcode::kI32x4LtS);
-    supported_opcodes_.insert(IrOpcode::kI32x4LeS);
-    supported_opcodes_.insert(IrOpcode::kI32x4GtS);
-    supported_opcodes_.insert(IrOpcode::kI32x4GeS);
-    supported_opcodes_.insert(IrOpcode::kI32x4UConvertF32x4);
-    supported_opcodes_.insert(IrOpcode::kI32x4UConvertI16x8Low);
-    supported_opcodes_.insert(IrOpcode::kI32x4UConvertI16x8High);
-    supported_opcodes_.insert(IrOpcode::kI32x4ShrU);
-    supported_opcodes_.insert(IrOpcode::kI32x4MinU);
-    supported_opcodes_.insert(IrOpcode::kI32x4MaxU);
-    supported_opcodes_.insert(IrOpcode::kI32x4LtU);
-    supported_opcodes_.insert(IrOpcode::kI32x4LeU);
-    supported_opcodes_.insert(IrOpcode::kI32x4GtU);
-    supported_opcodes_.insert(IrOpcode::kI32x4GeU);
-    supported_opcodes_.insert(IrOpcode::kI16x8Splat);
-    supported_opcodes_.insert(IrOpcode::kI16x8ExtractLane);
-    supported_opcodes_.insert(IrOpcode::kI16x8ReplaceLane);
-    supported_opcodes_.insert(IrOpcode::kI16x8SConvertI8x16Low);
-    supported_opcodes_.insert(IrOpcode::kI16x8SConvertI8x16High);
-    supported_opcodes_.insert(IrOpcode::kI16x8Neg);
-    supported_opcodes_.insert(IrOpcode::kI16x8Shl);
-    supported_opcodes_.insert(IrOpcode::kI16x8ShrS);
-    supported_opcodes_.insert(IrOpcode::kI16x8SConvertI32x4);
-    supported_opcodes_.insert(IrOpcode::kI16x8Add);
-    supported_opcodes_.insert(IrOpcode::kI16x8AddSaturateS);
-    supported_opcodes_.insert(IrOpcode::kI16x8AddHoriz);
-    supported_opcodes_.insert(IrOpcode::kI16x8Sub);
-    supported_opcodes_.insert(IrOpcode::kI16x8SubSaturateS);
-    supported_opcodes_.insert(IrOpcode::kI16x8Mul);
-    supported_opcodes_.insert(IrOpcode::kI16x8MinS);
-    supported_opcodes_.insert(IrOpcode::kI16x8MaxS);
-    supported_opcodes_.insert(IrOpcode::kI16x8Eq);
-    supported_opcodes_.insert(IrOpcode::kI16x8Ne);
-    supported_opcodes_.insert(IrOpcode::kI16x8LtS);
-    supported_opcodes_.insert(IrOpcode::kI16x8LeS);
-    supported_opcodes_.insert(IrOpcode::kI16x8GtS);
-    supported_opcodes_.insert(IrOpcode::kI16x8GeS);
-    supported_opcodes_.insert(IrOpcode::kI16x8UConvertI8x16Low);
-    supported_opcodes_.insert(IrOpcode::kI16x8UConvertI8x16High);
-    supported_opcodes_.insert(IrOpcode::kI16x8ShrU);
-    supported_opcodes_.insert(IrOpcode::kI16x8UConvertI32x4);
-    supported_opcodes_.insert(IrOpcode::kI16x8AddSaturateU);
-    supported_opcodes_.insert(IrOpcode::kI16x8SubSaturateU);
-    supported_opcodes_.insert(IrOpcode::kI16x8MinU);
-    supported_opcodes_.insert(IrOpcode::kI16x8MaxU);
-    supported_opcodes_.insert(IrOpcode::kI16x8LtU);
-    supported_opcodes_.insert(IrOpcode::kI16x8LeU);
-    supported_opcodes_.insert(IrOpcode::kI16x8GtU);
-    supported_opcodes_.insert(IrOpcode::kI16x8GeU);
-    supported_opcodes_.insert(IrOpcode::kI8x16Splat);
-    supported_opcodes_.insert(IrOpcode::kI8x16ExtractLane);
-    supported_opcodes_.insert(IrOpcode::kI8x16ReplaceLane);
-    supported_opcodes_.insert(IrOpcode::kI8x16SConvertI16x8);
-    supported_opcodes_.insert(IrOpcode::kI8x16Neg);
-    supported_opcodes_.insert(IrOpcode::kI8x16Shl);
-    supported_opcodes_.insert(IrOpcode::kI8x16ShrS);
-    supported_opcodes_.insert(IrOpcode::kI8x16Add);
-    supported_opcodes_.insert(IrOpcode::kI8x16AddSaturateS);
-    supported_opcodes_.insert(IrOpcode::kI8x16Sub);
-    supported_opcodes_.insert(IrOpcode::kI8x16SubSaturateS);
-    supported_opcodes_.insert(IrOpcode::kI8x16Mul);
-    supported_opcodes_.insert(IrOpcode::kI8x16MinS);
-    supported_opcodes_.insert(IrOpcode::kI8x16MaxS);
-    supported_opcodes_.insert(IrOpcode::kI8x16Eq);
-    supported_opcodes_.insert(IrOpcode::kI8x16Ne);
-    supported_opcodes_.insert(IrOpcode::kI8x16LtS);
-    supported_opcodes_.insert(IrOpcode::kI8x16LeS);
-    supported_opcodes_.insert(IrOpcode::kI8x16GtS);
-    supported_opcodes_.insert(IrOpcode::kI8x16GeS);
-    supported_opcodes_.insert(IrOpcode::kI8x16UConvertI16x8);
-    supported_opcodes_.insert(IrOpcode::kI8x16AddSaturateU);
-    supported_opcodes_.insert(IrOpcode::kI8x16SubSaturateU);
-    supported_opcodes_.insert(IrOpcode::kI8x16ShrU);
-    supported_opcodes_.insert(IrOpcode::kI8x16MinU);
-    supported_opcodes_.insert(IrOpcode::kI8x16MaxU);
-    supported_opcodes_.insert(IrOpcode::kI8x16LtU);
-    supported_opcodes_.insert(IrOpcode::kI8x16LeU);
-    supported_opcodes_.insert(IrOpcode::kI8x16GtU);
-    */
-    supported_opcodes_.insert(IrOpcode::kI8x16GeU);
-    /*
-    supported_opcodes_.insert(IrOpcode::kS128Load);
-    supported_opcodes_.insert(IrOpcode::kS128Store);
-    supported_opcodes_.insert(IrOpcode::kS128Zero);
-    supported_opcodes_.insert(IrOpcode::kS128Not);
-    supported_opcodes_.insert(IrOpcode::kS128And);
-    supported_opcodes_.insert(IrOpcode::kS128Or);
-    supported_opcodes_.insert(IrOpcode::kS128Xor);
-    supported_opcodes_.insert(IrOpcode::kS128Select);
-    supported_opcodes_.insert(IrOpcode::kS8x16Shuffle);
-    supported_opcodes_.insert(IrOpcode::kS1x4AnyTrue);
-    supported_opcodes_.insert(IrOpcode::kS1x4AllTrue);
-    supported_opcodes_.insert(IrOpcode::kS1x8AnyTrue);
-    supported_opcodes_.insert(IrOpcode::kS1x8AllTrue);
-    supported_opcodes_.insert(IrOpcode::kS1x16AnyTrue);
-    supported_opcodes_.insert(IrOpcode::kS1x16AllTrue);
-    */
-  }
   bool HasUnsupportedOpcode(LoopTree::Loop* loop) {
     bool has_simd = false;
     for (Node* node : loop_tree_->LoopNodes(loop)) {
@@ -2027,7 +1884,6 @@ class LoopRevectorizer : public ZoneObject {
     return false;
   }
 
-  // TODO common constant node
   bool UnsupportedInductionVariables(LoopTree::Loop* loop) {
     for (Node* node : loop_tree_->HeaderNodes(loop)) {
       if (NodeProperties::IsPhi(node)) {
@@ -2036,38 +1892,6 @@ class LoopRevectorizer : public ZoneObject {
           InductionVariable* var = it->second;
           Node* incr = var->increment();
           if (!IsSupportedConstNode(incr)) {
-            return true;
-          }
-
-          auto search = use_count_.find(incr->id());
-          if (search != use_count_.end()) {
-            use_count_[incr->id()] += 1;
-          } else {
-            use_count_[incr->id()] = 1;
-          }
-        }
-      }
-    }
-
-    // OwnedBy()
-    for (Node* node : loop_tree_->HeaderNodes(loop)) {
-      if (NodeProperties::IsPhi(node)) {
-        auto it = induction_vars_.find(node->id());
-        if (it != induction_vars_.end()) {
-          InductionVariable* var = it->second;
-          Node* incr = var->increment();
-          if (incr->UseCount() != use_count_[incr->id()]) {
-            TRACE("revec--- node %i use = %d != %d\n", incr->id(),
-                  incr->UseCount(), use_count_[incr->id()]);
-            TRACE("revec--- use node:");
-            for (Edge const edge : incr->use_edges()) {
-              // if (!IsValueEdge(edge))
-              // continue;
-              Node* use = edge.from();
-              TRACE(" %d", use->id());
-            }
-            TRACE("\n");
-
             return true;
           }
         }
@@ -2484,26 +2308,42 @@ V(Float64LessThanOrEqual)
     }
   }
 
+  // new_node->param = old_node->param * multiplier + addend
+  Node* CreateConstantNode(Node* old_node, int multiplier, int addend) {
+    Node* new_node = nullptr;
+    if (!IsSupportedConstNode(old_node)) {
+      TRACE("revec--- can't double non-const node\n");
+      return nullptr;
+    }
+    if (old_node->opcode() == IrOpcode::kInt32Constant) {
+      Operator1<int32_t>* op1 = (Operator1<int32_t>*)(old_node->op());
+      int32_t value = op1->parameter();
+      new_node = scheduler_->mcgraph_->Int32Constant(value * multiplier + addend);
+
+    } else if (old_node->opcode() == IrOpcode::kInt64Constant) {
+      Operator1<int64_t>* op1 = (Operator1<int64_t>*)(old_node->op());
+      int64_t value = op1->parameter();
+      new_node = scheduler_->mcgraph_->Int64Constant(value * multiplier + addend);
+    }
+
+    return new_node;
+  }
+
   void UpdateInductionStride(LoopTree::Loop* loop) {
-    std::set<int> used;
     for (Node* node : loop_tree_->HeaderNodes(loop)) {
       if (NodeProperties::IsPhi(node)) {
         auto it = induction_vars_.find(node->id());
         if (it != induction_vars_.end()) {
           InductionVariable* var = it->second;
           Node* incr = var->increment();
+          Node* arith = var->arith();
           if (IsSupportedConstNode(incr)) {
-            if (used.find(incr->id()) == used.end()) {
-              TRACE("revec--- double constant node %d\n", incr->id());
-              TransformConstantNode(incr, 2, 0);
-              used.insert(incr->id());
-            }
 
-            /*
-            Node* newincr =
-                scheduler_->graph_->NewNode(common_->Int32Constant());
-            for (incr->ReplaceUses();)
-            */
+            //Node* newincr = scheduler_->graph_->NewNode(scheduler_->common_->Int32Constant(TransformConstantValue(incr, 2, 0)));
+            //Node* newincr = scheduler_->mcgraph_->Int32Constant(TransformConstantValue(incr, 2, 0));
+            Node* newincr = CreateConstantNode(incr, 2, 0);
+            arith->ReplaceInput(1, newincr);
+            TRACE("revec--- constant node %d->%d\n", incr->id(), newincr->id());
 
           }
           // TODO
@@ -2567,11 +2407,31 @@ V(Float64LessThanOrEqual)
       if (op == IrOpcode::kWord32Equal) {
       } else if (op == IrOpcode::kInt32LessThan) {
         if (final_value == (-incr_value) - 1) {
-          TransformConstantNode(final, 2, 1);
+          //TransformConstantNode(final, 2, 1);
+          Node* newfinal = CreateConstantNode(final, 2, 1);
+          if(cond->InputAt(0) == final)
+          {
+            cond->ReplaceInput(0, newfinal);
+          }
+          else
+          {
+            cond->ReplaceInput(1, newfinal);
+          }
+
         }
       } else if (op == IrOpcode::kInt32LessThanOrEqual) {
         if (final_value == (-incr_value)) {
-          TransformConstantNode(final, 2, 0);
+          //TransformConstantNode(final, 2, 0);
+          Node* newfinal = CreateConstantNode(final, 2, 0);
+          if(cond->InputAt(0) == final)
+          {
+            cond->ReplaceInput(0, newfinal);
+          }
+          else
+          {
+            cond->ReplaceInput(1, newfinal);
+          }
+
         }
       }
     }
@@ -2796,12 +2656,154 @@ V(Float64LessThanOrEqual)
   Schedule* schedule_;
   ZoneMap<int, InductionVariable*> induction_vars_;
   ZoneMap<int, IteratorVariable*> iterator_vars_;
-  ZoneMap<int, int> use_count_;
 
   LoopTree* loop_tree_;
-  std::set<IrOpcode::Value> supported_opcodes_;
   std::set<LoopTree::Loop*> selected_loop_;
   static const size_t kMaxLoopNodes = 1000;
+  static const std::set<IrOpcode::Value> supported_opcodes_;
+};
+
+const std::set<IrOpcode::Value> LoopRevectorizer::supported_opcodes_ = {
+  /*
+    IrOpcode::kF32x4Splat,
+    IrOpcode::kF32x4ExtractLane,
+    IrOpcode::kF32x4ReplaceLane,
+    IrOpcode::kF32x4SConvertI32x4,
+    IrOpcode::kF32x4UConvertI32x4,
+    IrOpcode::kF32x4Abs,
+    IrOpcode::kF32x4Neg,
+    IrOpcode::kF32x4RecipApprox,
+    IrOpcode::kF32x4RecipSqrtApprox,
+    */
+    IrOpcode::kF32x4Add,
+    // IrOpcode::kF32x4AddHoriz,
+    IrOpcode::kF32x4Sub,
+    IrOpcode::kF32x4Mul,
+    /*
+    IrOpcode::kF32x4Min,
+    IrOpcode::kF32x4Max,
+    IrOpcode::kF32x4Eq,
+    IrOpcode::kF32x4Ne,
+    IrOpcode::kF32x4Lt,
+    IrOpcode::kF32x4Le,
+    IrOpcode::kF32x4Gt,
+    IrOpcode::kF32x4Ge,
+    */
+    /*
+    IrOpcode::kI32x4Splat,
+    IrOpcode::kI32x4ExtractLane,
+    IrOpcode::kI32x4ReplaceLane,
+    IrOpcode::kI32x4SConvertF32x4,
+    IrOpcode::kI32x4SConvertI16x8Low,
+    IrOpcode::kI32x4SConvertI16x8High,
+    IrOpcode::kI32x4Neg,
+    IrOpcode::kI32x4Shl,
+    IrOpcode::kI32x4ShrS,
+    IrOpcode::kI32x4Add,
+    IrOpcode::kI32x4AddHoriz,
+    IrOpcode::kI32x4Sub,
+    IrOpcode::kI32x4Mul,
+    IrOpcode::kI32x4MinS,
+    IrOpcode::kI32x4MaxS,
+    IrOpcode::kI32x4Eq,
+    IrOpcode::kI32x4Ne,
+    IrOpcode::kI32x4LtS,
+    IrOpcode::kI32x4LeS,
+    IrOpcode::kI32x4GtS,
+    IrOpcode::kI32x4GeS,
+    IrOpcode::kI32x4UConvertF32x4,
+    IrOpcode::kI32x4UConvertI16x8Low,
+    IrOpcode::kI32x4UConvertI16x8High,
+    IrOpcode::kI32x4ShrU,
+    IrOpcode::kI32x4MinU,
+    IrOpcode::kI32x4MaxU,
+    IrOpcode::kI32x4LtU,
+    IrOpcode::kI32x4LeU,
+    IrOpcode::kI32x4GtU,
+    IrOpcode::kI32x4GeU,
+    IrOpcode::kI16x8Splat,
+    IrOpcode::kI16x8ExtractLane,
+    IrOpcode::kI16x8ReplaceLane,
+    IrOpcode::kI16x8SConvertI8x16Low,
+    IrOpcode::kI16x8SConvertI8x16High,
+    IrOpcode::kI16x8Neg,
+    IrOpcode::kI16x8Shl,
+    IrOpcode::kI16x8ShrS,
+    IrOpcode::kI16x8SConvertI32x4,
+    IrOpcode::kI16x8Add,
+    IrOpcode::kI16x8AddSaturateS,
+    IrOpcode::kI16x8AddHoriz,
+    IrOpcode::kI16x8Sub,
+    IrOpcode::kI16x8SubSaturateS,
+    IrOpcode::kI16x8Mul,
+    IrOpcode::kI16x8MinS,
+    IrOpcode::kI16x8MaxS,
+    IrOpcode::kI16x8Eq,
+    IrOpcode::kI16x8Ne,
+    IrOpcode::kI16x8LtS,
+    IrOpcode::kI16x8LeS,
+    IrOpcode::kI16x8GtS,
+    IrOpcode::kI16x8GeS,
+    IrOpcode::kI16x8UConvertI8x16Low,
+    IrOpcode::kI16x8UConvertI8x16High,
+    IrOpcode::kI16x8ShrU,
+    IrOpcode::kI16x8UConvertI32x4,
+    IrOpcode::kI16x8AddSaturateU,
+    IrOpcode::kI16x8SubSaturateU,
+    IrOpcode::kI16x8MinU,
+    IrOpcode::kI16x8MaxU,
+    IrOpcode::kI16x8LtU,
+    IrOpcode::kI16x8LeU,
+    IrOpcode::kI16x8GtU,
+    IrOpcode::kI16x8GeU,
+    IrOpcode::kI8x16Splat,
+    IrOpcode::kI8x16ExtractLane,
+    IrOpcode::kI8x16ReplaceLane,
+    IrOpcode::kI8x16SConvertI16x8,
+    IrOpcode::kI8x16Neg,
+    IrOpcode::kI8x16Shl,
+    IrOpcode::kI8x16ShrS,
+    IrOpcode::kI8x16Add,
+    IrOpcode::kI8x16AddSaturateS,
+    IrOpcode::kI8x16Sub,
+    IrOpcode::kI8x16SubSaturateS,
+    IrOpcode::kI8x16Mul,
+    IrOpcode::kI8x16MinS,
+    IrOpcode::kI8x16MaxS,
+    IrOpcode::kI8x16Eq,
+    IrOpcode::kI8x16Ne,
+    IrOpcode::kI8x16LtS,
+    IrOpcode::kI8x16LeS,
+    IrOpcode::kI8x16GtS,
+    IrOpcode::kI8x16GeS,
+    IrOpcode::kI8x16UConvertI16x8,
+    IrOpcode::kI8x16AddSaturateU,
+    IrOpcode::kI8x16SubSaturateU,
+    IrOpcode::kI8x16ShrU,
+    IrOpcode::kI8x16MinU,
+    IrOpcode::kI8x16MaxU,
+    IrOpcode::kI8x16LtU,
+    IrOpcode::kI8x16LeU,
+    IrOpcode::kI8x16GtU,
+    */
+    IrOpcode::kI8x16GeU,
+    /*
+    IrOpcode::kS128Load,
+    IrOpcode::kS128Store,
+    IrOpcode::kS128Zero,
+    IrOpcode::kS128Not,
+    IrOpcode::kS128And,
+    IrOpcode::kS128Or,
+    IrOpcode::kS128Xor,
+    IrOpcode::kS128Select,
+    IrOpcode::kS8x16Shuffle,
+    IrOpcode::kS1x4AnyTrue,
+    IrOpcode::kS1x4AllTrue,
+    IrOpcode::kS1x8AnyTrue,
+    IrOpcode::kS1x8AllTrue,
+    IrOpcode::kS1x16AnyTrue,
+    IrOpcode::kS1x16AllTrue,
+    */
 };
 
 // -----------------------------------------------------------------------------
