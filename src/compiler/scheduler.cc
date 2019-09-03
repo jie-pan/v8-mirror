@@ -1828,6 +1828,8 @@ void Scheduler::MovePlannedNodes(BasicBlock* from, BasicBlock* to) {
   }
 }
 
+// -----------------------------------------------------------------------------
+
 class LoopRevectorizer : public ZoneObject {
  public:
   LoopRevectorizer(Zone* zone, Scheduler* scheduler)
@@ -1899,6 +1901,9 @@ class LoopRevectorizer : public ZoneObject {
     return false;
   }
 
+  bool IsEven(int64_t number) {
+    return (number & 1) == 0;
+  }
   bool SatifyConstIteratorCheck(IteratorVariable* var) {
     Node* init = var->init_value();
     Node* incr = var->increment();
@@ -1909,8 +1914,6 @@ class LoopRevectorizer : public ZoneObject {
 
     Node* cond = var->cond();
     IrOpcode::Value op = var->cond()->opcode();
-
-    int64_t iterator_count = 0;
 
     if (init->opcode() == IrOpcode::kInt32Constant &&
         incr->opcode() == IrOpcode::kInt32Constant &&
@@ -1946,7 +1949,7 @@ class LoopRevectorizer : public ZoneObject {
       }
 
       if (op == IrOpcode::kWord32Equal || op == IrOpcode::kWord64Equal) {
-        if (reminder == 0 && (trip_count & 1) == 0) {
+        if (reminder == 0 && IsEven(trip_count)) {
           return true;
         }
       } else if (op == IrOpcode::kInt32LessThan ||
@@ -1954,7 +1957,7 @@ class LoopRevectorizer : public ZoneObject {
         if (reminder != 0) {
           trip_count++;
         }
-        if ((trip_count & 1) == 0) {
+        if (IsEven(trip_count)) {
           return true;
         }
       } else if (op == IrOpcode::kInt32LessThanOrEqual) {  // overrun
@@ -1972,7 +1975,7 @@ class LoopRevectorizer : public ZoneObject {
             }
       */
       if (op == IrOpcode::kWord32Equal || op == IrOpcode::kWord64Equal) {
-        if (reminder == 0 && (trip_count & 1) == 0) {
+        if (reminder == 0 && IsEven(trip_count)) {
           return true;
         }
       } else if (op == IrOpcode::kInt32LessThan ||
@@ -1983,7 +1986,7 @@ class LoopRevectorizer : public ZoneObject {
           if (reminder != 0) {
             trip_count++;
           }
-          if ((trip_count & 1) == 0) {
+          if (IsEven(trip_count)) {
             return true;
           }
         }
