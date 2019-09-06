@@ -178,10 +178,6 @@ class Operator1 : public Operator {
 
   T const& parameter() const { return parameter_; }
 
-  void SetParameter(T parameter) {
-      parameter_ = parameter;
-  }
-
   bool Equals(const Operator* other) const final {
     if (opcode() != other->opcode()) return false;
     const Operator1<T, Pred, Hash>* that =
@@ -207,7 +203,7 @@ class Operator1 : public Operator {
   }
 
  private:
-  T /*const*/ parameter_;
+  T const parameter_;
   Pred const pred_;
   Hash const hash_;
 };
