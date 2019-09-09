@@ -2497,7 +2497,7 @@ V(Float64LessThanOrEqual)
   }
 
   void UpdateGraph(LoopTree::Loop* loop) {
-    //UpdateIterator(loop);
+    UpdateIterator(loop);
     UpdateInductionStride(loop);
   }
 
