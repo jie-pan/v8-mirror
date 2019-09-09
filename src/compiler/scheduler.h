@@ -126,8 +126,8 @@ class V8_EXPORT_PRIVATE Scheduler {
 
   // Phase 7: Revectorize wasm simd loop
   friend class LoopRevectorizer;
-  void AnalysisAndUpdateGraph();
-  void MarkBasicBlocks();
+  void SelectLoopAndUpdateGraph();
+  void MarkBlockInLoops();
 
   void FuseFloatingControl(BasicBlock* block, Node* node);
   void MovePlannedNodes(BasicBlock* from, BasicBlock* to);
