@@ -2241,11 +2241,20 @@ V(Float64LessThanOrEqual)
 
   // TODO: handle reduction variable
   bool HasOutsideDependency(LoopTree::Loop* loop) {
+    std::set<IrOpcode::Value> supported_init_opcode = {
+      IrOpcode::kS128Zero,
+      IrOpcode::kS128Xor,
+      IrOpcode::kF32x4Splat,
+      IrOpcode::kI8x16Splat,
+      IrOpcode::kI16x8Splat,
+      IrOpcode::kI32x4Splat,
+    };
     // check input
     for (Node* node : loop_tree_->LoopNodes(loop)) {
       for (Node* input : node->inputs()) {
         if (!loop_tree_->Contains(loop, input)) {  // input of nodes outside loop
-          if (NodeProperties::IsSimd(input)) {
+          if (NodeProperties::IsSimd(input) &&
+              supported_init_opcode.find(input->opcode()) == supported_init_opcode.end()) {
             // BasicBlock* block = schedule_->block(node);
             return true;
           }
