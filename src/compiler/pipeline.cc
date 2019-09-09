@@ -1614,7 +1614,7 @@ struct ComputeSchedulePhase {
     Schedule* schedule = Scheduler::ComputeSchedule(
         temp_zone, data->graph(), data->info()->is_splitting_enabled()
                                       ? Scheduler::kSplitNodes
-                                      : Scheduler::kNoFlags);
+                                      : Scheduler::kNoFlags, data->mcgraph());
     if (FLAG_turbo_verify) ScheduleVerifier::Run(schedule);
     data->set_schedule(schedule);
   }

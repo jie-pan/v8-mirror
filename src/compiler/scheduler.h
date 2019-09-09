@@ -12,6 +12,7 @@
 #include "src/compiler/zone-stats.h"
 #include "src/globals.h"
 #include "src/zone/zone-containers.h"
+#include "src/compiler/machine-graph.h"
 
 namespace v8 {
 namespace internal {
@@ -22,7 +23,7 @@ class CFGBuilder;
 class ControlEquivalence;
 class Graph;
 class SpecialRPONumberer;
-
+class LoopRevectorizer;
 
 // Computes a schedule from a graph, placing nodes into basic blocks and
 // ordering the basic blocks in the special RPO order.
@@ -34,7 +35,7 @@ class V8_EXPORT_PRIVATE Scheduler {
 
   // The complete scheduling algorithm. Creates a new schedule and places all
   // nodes from the graph into it.
-  static Schedule* ComputeSchedule(Zone* temp_zone, Graph* graph, Flags flags);
+  static Schedule* ComputeSchedule(Zone* temp_zone, Graph* graph, Flags flags, MachineGraph* mcgraph = nullptr);
 
   // Compute the RPO of blocks in an existing schedule.
   static BasicBlockVector* ComputeSpecialRPO(Zone* zone, Schedule* schedule);
@@ -68,6 +69,7 @@ class V8_EXPORT_PRIVATE Scheduler {
 
   Zone* zone_;
   Graph* graph_;
+  MachineGraph * mcgraph_;
   Schedule* schedule_;
   Flags flags_;
   ZoneVector<NodeVector*>
@@ -78,8 +80,9 @@ class V8_EXPORT_PRIVATE Scheduler {
   CFGBuilder* control_flow_builder_;     // Builds basic blocks for controls.
   SpecialRPONumberer* special_rpo_;      // Special RPO numbering of blocks.
   ControlEquivalence* equivalence_;      // Control dependence equivalence.
+  LoopRevectorizer* loop_revectorizer_;  // Revectorizer wasm simd loop
 
-  Scheduler(Zone* zone, Graph* graph, Schedule* schedule, Flags flags,
+  Scheduler(Zone* zone, Graph* graph, MachineGraph* mcgraph, Schedule* schedule, Flags flags,
             size_t node_count_hint_);
 
   inline SchedulerData DefaultSchedulerData();
@@ -119,6 +122,11 @@ class V8_EXPORT_PRIVATE Scheduler {
 
   // Phase 6: Seal the final schedule.
   void SealFinalSchedule();
+
+  // Phase 7: Revectorize wasm simd loop
+  friend class LoopRevectorizer;
+  void SelectLoopAndUpdateGraph();
+  void MarkBlockInLoops();
 
   void FuseFloatingControl(BasicBlock* block, Node* node);
   void MovePlannedNodes(BasicBlock* from, BasicBlock* to);

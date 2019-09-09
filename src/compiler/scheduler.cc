@@ -15,6 +15,8 @@
 #include "src/compiler/node-properties.h"
 #include "src/compiler/node.h"
 #include "src/zone/zone-containers.h"
+#include "src/compiler/loop-variable-optimizer.h"
+#include "src/compiler/loop-analysis.h"
 
 namespace v8 {
 namespace internal {
@@ -25,10 +27,11 @@ namespace compiler {
     if (FLAG_trace_turbo_scheduler) PrintF(__VA_ARGS__); \
   } while (false)
 
-Scheduler::Scheduler(Zone* zone, Graph* graph, Schedule* schedule, Flags flags,
-                     size_t node_count_hint)
+Scheduler::Scheduler(Zone* zone, Graph* graph, MachineGraph* mcgraph,
+                     Schedule* schedule, Flags flags, size_t node_count_hint)
     : zone_(zone),
       graph_(graph),
+      mcgraph_(mcgraph),
       schedule_(schedule),
       flags_(flags),
       scheduled_nodes_(zone),
@@ -39,7 +42,8 @@ Scheduler::Scheduler(Zone* zone, Graph* graph, Schedule* schedule, Flags flags,
   node_data_.resize(graph->NodeCount(), DefaultSchedulerData());
 }
 
-Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags) {
+Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags,
+                                     MachineGraph* mcgraph) {
   Zone* schedule_zone =
       (flags & Scheduler::kTempSchedule) ? zone : graph->zone();
 
@@ -50,7 +54,12 @@ Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags) {
 
   Schedule* schedule =
       new (schedule_zone) Schedule(schedule_zone, node_count_hint);
-  Scheduler scheduler(zone, graph, schedule, flags, node_count_hint);
+  Scheduler scheduler(zone, graph, mcgraph, schedule, flags, node_count_hint);
+
+  if (FLAG_wasm_revec && graph->HasSimd()) {
+    // TODO: check hardware avx support
+    scheduler.SelectLoopAndUpdateGraph();
+  }
 
   scheduler.BuildCFG();
   scheduler.ComputeSpecialRPONumbering();
@@ -61,6 +70,10 @@ Schedule* Scheduler::ComputeSchedule(Zone* zone, Graph* graph, Flags flags) {
   scheduler.ScheduleLate();
 
   scheduler.SealFinalSchedule();
+
+  if (FLAG_wasm_revec && graph->HasSimd()) {
+    scheduler.MarkBlockInLoops();
+  }
 
   return schedule;
 }
@@ -1808,6 +1821,433 @@ void Scheduler::MovePlannedNodes(BasicBlock* from, BasicBlock* to) {
     std::swap(scheduled_nodes_[from->id().ToSize()],
               scheduled_nodes_[to->id().ToSize()]);
   }
+}
+
+// -----------------------------------------------------------------------------
+
+class LoopRevectorizer : public ZoneObject {
+ public:
+  LoopRevectorizer(Zone* zone, Scheduler* scheduler)
+      : zone_(zone),
+        scheduler_(scheduler),
+        schedule_(scheduler->schedule_),
+        induction_vars_(zone),
+        iterator_vars_(zone),
+        selected_loop_(zone),
+        loop_tree_(nullptr) {}
+
+  InductionVariable* TryGetInductionVariable(Node* phi) {
+    DCHECK_EQ(2, phi->op()->ValueInputCount());
+    Node* loop = NodeProperties::GetControlInput(phi);
+    DCHECK_EQ(IrOpcode::kLoop, loop->opcode());
+    Node* initial = phi->InputAt(0);
+    Node* arith = phi->InputAt(1);
+    InductionVariable::ArithmeticType arithmeticType;
+
+    if (arith->opcode() == IrOpcode::kInt32Add ||
+        arith->opcode() == IrOpcode::kInt64Add ||
+        arith->opcode() == IrOpcode::kFloat32Add ||
+        arith->opcode() == IrOpcode::kFloat64Add) {
+      arithmeticType = InductionVariable::ArithmeticType::kAddition;
+    } else if (arith->opcode() == IrOpcode::kInt32Sub ||
+               arith->opcode() == IrOpcode::kInt64Sub ||
+               arith->opcode() == IrOpcode::kFloat32Sub ||
+               arith->opcode() == IrOpcode::kFloat64Sub) {
+      arithmeticType = InductionVariable::ArithmeticType::kSubtraction;
+    } else {
+      return nullptr;
+    }
+
+    Node* input = arith->InputAt(0);
+
+    if (input != phi) return nullptr;
+
+    Node* effect_phi = nullptr;
+    for (Node* use : loop->uses()) {
+      if (use->opcode() == IrOpcode::kEffectPhi) {
+        DCHECK_NULL(effect_phi);
+        effect_phi = use;
+      }
+    }
+    if (!effect_phi) return nullptr;
+
+    Node* incr = arith->InputAt(1);
+
+    TRACE(
+        "revec--- induction var: phi %i, effect_phi %i, arith %i, incr "
+        "%i, init %i, type %i\n",
+        phi->id(), effect_phi->id(), arith->id(), incr->id(), initial->id(),
+        arithmeticType);
+    return new (zone_) InductionVariable(phi, effect_phi, arith, incr, initial,
+                                         zone_, arithmeticType);
+  }
+
+  void DetectInductionVariables(Node* loop) {
+    if (loop->op()->ControlInputCount() != 2) return;
+    TRACE("revec--- Loop variables for loop %i:\n", loop->id());
+    for (Edge edge : loop->use_edges()) {
+      if (NodeProperties::IsControlEdge(edge) &&
+          edge.from()->opcode() == IrOpcode::kPhi) {
+        Node* phi = edge.from();
+        InductionVariable* induction_var = TryGetInductionVariable(phi);
+        if (induction_var) {
+          induction_vars_[phi->id()] = induction_var;
+        }
+      }
+    }
+  }
+
+  void TryGetMainIterator(Node* node) {
+    Node* branch = node->InputAt(0);
+    Node* cond = branch->InputAt(0);
+    if (cond->opcode() == IrOpcode::kWord32Equal) {
+      if (cond->InputAt(0)->opcode() == IrOpcode::kWord32Equal) {
+        cond = cond->InputAt(0);
+      }
+    } else if (cond->opcode() == IrOpcode::kWord64Equal) {
+      if (cond->InputAt(0)->opcode() == IrOpcode::kWord64Equal) {
+        cond = cond->InputAt(0);
+      }
+    }
+
+    Node* left = cond->InputAt(0);
+    Node* right = cond->InputAt(1);
+    for (auto entry : induction_vars_) {
+      Node* final_value = nullptr;
+      InductionVariable* induction_var = entry.second;
+      if (induction_var->arith() == left) {
+        final_value = right;
+      } else if (induction_var->arith() == right) {
+        final_value = left;
+      }
+
+      if (final_value != nullptr) {
+        IteratorVariable* iterator_var = new (zone_)
+            IteratorVariable(induction_var->phi(), induction_var->effect_phi(),
+                             induction_var->arith(), induction_var->increment(),
+                             induction_var->init_value(), zone_,
+                             induction_var->Type(), cond, final_value);
+
+        iterator_vars_[induction_var->phi()->id()] = iterator_var;
+        TRACE("revec--- main induction_var %i\n",
+              induction_var->phi()->id());
+      }
+    }
+  }
+
+  void DetectMainIterator(Node* loop) {
+    if (loop->op()->ControlInputCount() != 2) return;
+
+    TRACE("revec--- Loop Count for loop %i\n", loop->id());
+    int max = NodeProperties::PastControlIndex(loop);
+    for (int i = NodeProperties::FirstControlIndex(loop); i < max; i++) {
+      Node* input = loop->InputAt(i);
+      if (input->opcode() == IrOpcode::kIfFalse ||
+          input->opcode() == IrOpcode::kIfTrue) {
+        TryGetMainIterator(input);
+      }
+    }
+  }
+
+  bool HasMultipleBackEdge(LoopTree::Loop* loop) {
+    Node* loop_node = loop_tree_->GetLoopControl(loop);
+    int backedges = loop_node->InputCount() - 1;
+    if (backedges > 1) {
+      return true;
+    }
+    return false;
+  }
+
+  bool HasUnsupportedOpcode(LoopTree::Loop* loop) {
+    bool has_simd = false;
+    for (Node* node : loop_tree_->LoopNodes(loop)) {
+      if (NodeProperties::IsSimd(node)) {
+        has_simd = true;
+        TRACE("revec--- found simd node #%d:%s\n", node->id(),
+              node->op()->mnemonic());
+        if (supported_opcodes_.find(node->opcode()) ==
+            supported_opcodes_.end()) {
+          TRACE("revec--- unsupported simd node #%d:%s\n", node->id(),
+                node->op()->mnemonic());
+          return true;
+        }
+      }
+    }
+    return !has_simd;
+  }
+
+  // Every loop has at least 1 call(Stack Check)
+  // TODO: don't check call count, check call parameter
+  bool HasAdditionalFunctionCall(LoopTree::Loop* loop) {
+    int call_count = 0;
+    for (Node* node : loop_tree_->LoopNodes(loop)) {
+      if (node->opcode() == IrOpcode::kCall) {
+        call_count++;
+      }
+    }
+
+    return call_count > 1;
+  }
+
+  bool IsSupportedConstNode(Node* incr) {
+    if (incr->opcode() == IrOpcode::kInt32Constant ||
+        incr->opcode() == IrOpcode::kInt64Constant) {
+      return true;
+    }
+
+    return false;
+  }
+
+  bool HasUnsupportedInductionVariables(LoopTree::Loop* loop) {
+    for (Node* node : loop_tree_->HeaderNodes(loop)) {
+      if (NodeProperties::IsPhi(node)) {
+        auto it = induction_vars_.find(node->id());
+        if (it != induction_vars_.end()) {
+          InductionVariable* var = it->second;
+          Node* incr = var->increment();
+          if (!IsSupportedConstNode(incr)) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  bool IsEven(int64_t number) { return (number & 1) == 0; }
+
+  bool CheckConstIterator(IteratorVariable* var) {
+    Node* init = var->init_value();
+    Node* incr = var->increment();
+    Node* final = var->final_value();
+    int64_t init_value = 0;
+    int64_t incr_value = 0;
+    int64_t final_value = 0;
+
+    IrOpcode::Value op = var->cond()->opcode();
+
+    if (init->opcode() == IrOpcode::kInt32Constant &&
+        incr->opcode() == IrOpcode::kInt32Constant &&
+        final->opcode() == IrOpcode::kInt32Constant) {
+      init_value = OpParameter<int32_t>(init->op());
+      incr_value = OpParameter<int32_t>(incr->op());
+      final_value = OpParameter<int32_t>(final->op());
+    } else if (init->opcode() == IrOpcode::kInt64Constant &&
+               incr->opcode() == IrOpcode::kInt64Constant &&
+               final->opcode() == IrOpcode::kInt64Constant) {
+      init_value = OpParameter<int64_t>(init->op());
+      incr_value = OpParameter<int64_t>(incr->op());
+      final_value = OpParameter<int64_t>(final->op());
+    } else {
+      return false;
+    }
+
+    if (incr_value == 0) {
+      return false;
+    }
+
+    int64_t trip_count = 0;
+    int64_t reminder = 0;
+    if (incr_value > 0) {
+      trip_count = (final_value - init_value) / incr_value;
+      reminder = (final_value - init_value) % incr_value;
+    } else {
+      trip_count = (init_value - final_value) / (-incr_value);
+      reminder = (init_value - final_value) % (-incr_value);
+    }
+    if (trip_count < 8) {
+      return false;
+    }
+
+    if (op == IrOpcode::kWord32Equal || op == IrOpcode::kWord64Equal) {
+      if (reminder == 0 && IsEven(trip_count)) {
+        return true;
+      }
+    } else if (op == IrOpcode::kInt32LessThan ||
+               op == IrOpcode::kInt64LessThan) {
+      if (reminder != 0) {
+        trip_count++;
+      }
+      if (IsEven(trip_count)) {
+        return true;
+      }
+      // TODO: check leftover loop
+      if (incr_value < 0 && final_value == (-incr_value) - 1) {
+        return true;
+      }
+    } else if (op == IrOpcode::kInt32LessThanOrEqual ||
+               op == IrOpcode::kInt64LessThanOrEqual) {
+      // TODO: check leftover loop
+      if (incr_value < 0 && final_value == (-incr_value)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  bool CheckIterator(IteratorVariable* var) {
+    Node* init = var->init_value();
+    Node* incr = var->increment();
+    Node* final = var->final_value();
+
+    if (NodeProperties::IsConstant(init) && NodeProperties::IsConstant(incr) &&
+        NodeProperties::IsConstant(final)) {
+      return CheckConstIterator(var);
+    }
+
+    return false;
+  }
+
+  bool HasUnsupportedMainIterator(LoopTree::Loop* loop) {
+    int count = 0;
+    for (Node* node : loop_tree_->HeaderNodes(loop)) {
+      if (NodeProperties::IsPhi(node)) {
+        auto it = iterator_vars_.find(node->id());
+        if (it != iterator_vars_.end()) {
+          count++;
+          IteratorVariable* var = it->second;
+          if (!CheckIterator(var)) {
+            return true;
+          }
+          // TODO, OwnedBy
+          // if(var->final_value())
+        }
+      }
+    }
+
+    return count != 1;
+  }
+
+  // TODO: handle reduction variable
+  bool HasOutsideDependency(LoopTree::Loop* loop) {
+    // check input
+    for (Node* node : loop_tree_->LoopNodes(loop)) {
+      for (Node* input : node->inputs()) {
+        if (!loop_tree_->Contains(loop,
+                                  input)) {  // input of nodes outside loop
+          if (NodeProperties::IsSimd(input)) {
+            // BasicBlock* block = schedule_->block(node);
+            return true;
+          }
+        }
+      }
+    }
+    // check uses
+    for (Node* node : loop_tree_->LoopNodes(loop)) {
+      for (Node* use : node->uses()) {
+        if (!loop_tree_->Contains(loop, use)) {  // use of nodes outside loop
+          if (NodeProperties::IsSimd(use)) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  bool HasMemoryDependency() { return false; }
+
+  bool CanReVectorize(LoopTree::Loop* loop) {
+    if (HasMultipleBackEdge(loop)) {
+      TRACE("revec--- HasMultipleBackEdge return\n");
+      return false;
+    }
+    if (HasUnsupportedOpcode(loop)) {
+      TRACE("revec--- HasUnsupportedOpcode return\n");
+      return false;
+    }
+    if (HasAdditionalFunctionCall(loop)) {
+      TRACE("revec--- HasFunctionCall return\n");
+      return false;
+    }
+    if (HasUnsupportedInductionVariables(loop)) {
+      TRACE("revec--- HasUnsupportedInductionVariables return\n");
+      return false;
+    }
+    if (HasUnsupportedMainIterator(loop)) {
+      TRACE("revec--- HasUnsupportedMainIterator return\n");
+      return false;
+    }
+    if (HasOutsideDependency(loop)) {
+      TRACE("revec--- HasOutsideDependency return\n");
+      return false;
+    }
+
+    // TODO:
+    if (HasMemoryDependency()) {
+      TRACE("revec--- HasMemoryDependency return");
+      return false;
+    }
+
+    return true;
+  }
+
+
+  void ReVectorizeIfPossible(LoopTree::Loop* loop) {
+    Node* loop_node = loop_tree_->GetLoopControl(loop);
+
+    TRACE("revec--- try to revec loop %i:\n", loop_node->id());
+    DetectInductionVariables(loop_node);
+    DetectMainIterator(loop_node);
+    if (CanReVectorize(loop)) {
+      selected_loop_.insert(loop);
+      //UpdateGraph(loop);
+      TRACE("revec--- finish revec loop %i:\n\n", loop_node->id());
+    } else {
+      TRACE("revec--- can't revec loop %i:\n\n", loop_node->id());
+    }
+  }
+
+  void ReVectorizeInnerLoops(LoopTree::Loop* loop) {
+    // If the loop has nested loops, revectorize inside those.
+    if (!loop->children().empty()) {
+      for (LoopTree::Loop* inner_loop : loop->children()) {
+        ReVectorizeInnerLoops(inner_loop);
+      }
+      return;
+    }
+    // Only revectorize small-enough loops.
+    if (loop->TotalSize() > kMaxLoopNodes) return;
+
+    ReVectorizeIfPossible(loop);
+  }
+
+  void SelectLoopAndUpdateGraph() {
+    loop_tree_ = LoopFinder::BuildLoopTree(scheduler_->graph_, zone_);
+    for (LoopTree::Loop* loop : loop_tree_->outer_loops()) {
+      ReVectorizeInnerLoops(loop);
+    }
+  }
+ private:
+  Zone* zone_;
+  Scheduler* scheduler_;
+  Schedule* schedule_;
+  ZoneMap<int, InductionVariable*> induction_vars_;
+  ZoneMap<int, IteratorVariable*> iterator_vars_;
+  ZoneSet<LoopTree::Loop*> selected_loop_;
+  LoopTree* loop_tree_;
+
+  static const size_t kMaxLoopNodes = 1000;
+  static const std::set<IrOpcode::Value> supported_opcodes_;
+};
+
+const std::set<IrOpcode::Value> LoopRevectorizer::supported_opcodes_ = {
+    IrOpcode::kF32x4Add,
+};
+
+// -----------------------------------------------------------------------------
+// Phase 7:
+void Scheduler::SelectLoopAndUpdateGraph() {
+  TRACE("--- %s -------------------------------------------\n", __func__);
+  loop_revectorizer_ = new (zone_) LoopRevectorizer(zone_, this);
+  loop_revectorizer_->SelectLoopAndUpdateGraph();
+}
+// Phase 7:
+void Scheduler::MarkBlockInLoops() {
+  TRACE("--- %s -------------------------------------------\n", __func__);
+  // loop_revectorizer_->MarkBlockInLoops();
 }
 
 #undef TRACE
