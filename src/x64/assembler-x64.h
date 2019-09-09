@@ -1318,6 +1318,11 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   AVX_3(instr##ps, opcode, vps) \
   AVX_3(instr##pd, opcode, vpd)
 
+// For 256bits avx instruction
+#define AVX_P_3_256(instr, opcode)  \
+  AVX_3(instr##ps##256, opcode, vps256) \
+  AVX_3(instr##pd##256, opcode, vpd256)
+
 #define AVX_3(instr, opcode, impl)                                  \
   void instr(XMMRegister dst, XMMRegister src1, XMMRegister src2) { \
     impl(opcode, dst, src1, src2);                                  \
@@ -1340,9 +1345,14 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   AVX_3(vcvtsd2ss, 0x5a, vsd)
   AVX_3(vhaddps, 0x7c, vsd)
 
+  // 256 bits AVX
+  AVX_P_3_256(vadd, 0x58)
+  AVX_P_3_256(vsub, 0x5c)
+
 #undef AVX_3
 #undef AVX_S_3
 #undef AVX_P_3
+#undef AVX_P_3_256
 #undef AVX_SP_3
 
   void vpsrlq(XMMRegister dst, XMMRegister src, byte imm8) {
@@ -1602,6 +1612,12 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void vps(byte op, XMMRegister dst, XMMRegister src1, Operand src2);
   void vpd(byte op, XMMRegister dst, XMMRegister src1, XMMRegister src2);
   void vpd(byte op, XMMRegister dst, XMMRegister src1, Operand src2);
+
+  //256bits
+  void vps256(byte op, XMMRegister dst, XMMRegister src1, XMMRegister src2);
+  void vps256(byte op, XMMRegister dst, XMMRegister src1, Operand src2);
+  void vpd256(byte op, XMMRegister dst, XMMRegister src1, XMMRegister src2);
+  void vpd256(byte op, XMMRegister dst, XMMRegister src1, Operand src2);
 
   // BMI instruction
   void andnq(Register dst, Register src1, Register src2) {
