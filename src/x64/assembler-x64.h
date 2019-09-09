@@ -1001,6 +1001,12 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   void movdqu(Operand dst, XMMRegister src);
   void movdqu(XMMRegister dst, Operand src);
 
+  void vmovdqu(Operand dst, XMMRegister src);
+  void vmovdqu(XMMRegister dst, Operand src);
+
+  void vmovdqu256(Operand dst, XMMRegister src);
+  void vmovdqu256(XMMRegister dst, Operand src);
+
   void movapd(XMMRegister dst, XMMRegister src);
   void movupd(XMMRegister dst, Operand src);
   void movupd(Operand dst, XMMRegister src);
