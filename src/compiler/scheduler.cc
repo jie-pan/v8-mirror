@@ -2272,6 +2272,51 @@ class LoopRevectorizer : public ZoneObject {
       ReVectorizeInnerLoops(loop);
     }
   }
+
+  BasicBlock* BasicBlockForLoopHeader(LoopTree::Loop* loop) {
+    Node* loop_node = loop_tree_->GetLoopControl(loop);
+
+    BasicBlock* header = nullptr;
+
+    BasicBlockVector* blocks = schedule_->rpo_order();
+    for (auto const block : *blocks) {
+      if (block->IsLoopHeader()) {
+        DCHECK_LE(2u, block->PredecessorCount());
+
+        for (Node* const node : *block) {
+          if (node->opcode() == IrOpcode::kLoop && node == loop_node) {
+            header = block;
+            TRACE("revec--- block id:%d for loop node #%d:%s\n",
+                  header->rpo_number(), node->id(), node->op()->mnemonic());
+            return header;
+          }
+        }
+      }
+    }
+    return header;
+  }
+
+  void MarkBlockInLoop(LoopTree::Loop* loop) {
+    BasicBlockVector* blocks = schedule_->rpo_order();
+
+    BasicBlock* header = BasicBlockForLoopHeader(loop);
+    if (header != nullptr) {
+      for (auto block : *blocks) {
+        if (header->LoopContains(block)) {
+          TRACE("revec--- mark block id:%d for loop convert\n",
+                block->rpo_number());
+          block->set_need_convert(true);
+        }
+      }
+    }
+  }
+
+  void MarkBlockInLoops() {
+    for (auto it = selected_loop_.begin(); it != selected_loop_.end(); ++it) {
+      MarkBlockInLoop(*it);
+    }
+  }
+
  private:
   Zone* zone_;
   Scheduler* scheduler_;
@@ -2299,7 +2344,7 @@ void Scheduler::SelectLoopAndUpdateGraph() {
 // Phase 7:
 void Scheduler::MarkBlockInLoops() {
   TRACE("--- %s -------------------------------------------\n", __func__);
-  // loop_revectorizer_->MarkBlockInLoops();
+  loop_revectorizer_->MarkBlockInLoops();
 }
 
 #undef TRACE
