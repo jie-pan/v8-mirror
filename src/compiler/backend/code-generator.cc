@@ -654,7 +654,7 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleInstruction(
     AssembleDeconstructFrame();
   }
   // Assemble architecture-specific code for the instruction.
-  CodeGenResult result = AssembleArchInstruction(instr);
+  CodeGenResult result = AssembleArchInstruction(instr, block->need_convert());
   if (result != kSuccess) return result;
 
   FlagsCondition condition = FlagsConditionField::decode(instr->opcode());
