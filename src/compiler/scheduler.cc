@@ -2184,6 +2184,58 @@ class LoopRevectorizer : public ZoneObject {
     return true;
   }
 
+  // new_node->param = old_node->param * multiplier + addend
+  Node* CreateConstantNode(Node* old_node, int multiplier, int addend) {
+    Node* new_node = nullptr;
+    if (!IsSupportedConstNode(old_node)) {
+      TRACE("revec--- can't double non-const node\n");
+      return nullptr;
+    }
+    if (old_node->opcode() == IrOpcode::kInt32Constant) {
+      Operator1<int32_t>* op1 = (Operator1<int32_t>*)(old_node->op());
+      int32_t value = op1->parameter();
+      new_node =
+          scheduler_->mcgraph_->Int32Constant(value * multiplier + addend);
+
+    } else if (old_node->opcode() == IrOpcode::kInt64Constant) {
+      Operator1<int64_t>* op1 = (Operator1<int64_t>*)(old_node->op());
+      int64_t value = op1->parameter();
+      new_node =
+          scheduler_->mcgraph_->Int64Constant(value * multiplier + addend);
+    }
+
+    return new_node;
+  }
+
+  void UpdateInductionVariableStride(LoopTree::Loop* loop) {
+    for (Node* node : loop_tree_->HeaderNodes(loop)) {
+      if (NodeProperties::IsPhi(node)) {
+        auto it = induction_vars_.find(node->id());
+        if (it != induction_vars_.end()) {
+          InductionVariable* var = it->second;
+          Node* incr = var->increment();
+          Node* arith = var->arith();
+          if (IsSupportedConstNode(incr)) {
+            Node* new_incr = CreateConstantNode(incr, 2, 0);
+
+            scheduler_->node_data_.resize(new_incr->id() + 1,
+                                          scheduler_->DefaultSchedulerData());
+            scheduler_->node_data_[new_incr->id()] =
+                scheduler_->node_data_[incr->id()];
+
+            arith->ReplaceInput(1, new_incr);
+            TRACE("revec--- create constant node %d->%d\n", incr->id(),
+                  new_incr->id());
+          }
+        }
+      }
+    }
+  }
+
+  void UpdateGraph(LoopTree::Loop* loop) {
+    // UpdateIterator(loop);
+    UpdateInductionVariableStride(loop);
+  }
 
   void ReVectorizeIfPossible(LoopTree::Loop* loop) {
     Node* loop_node = loop_tree_->GetLoopControl(loop);
@@ -2193,7 +2245,7 @@ class LoopRevectorizer : public ZoneObject {
     DetectMainIterator(loop_node);
     if (CanReVectorize(loop)) {
       selected_loop_.insert(loop);
-      //UpdateGraph(loop);
+      UpdateGraph(loop);
       TRACE("revec--- finish revec loop %i:\n\n", loop_node->id());
     } else {
       TRACE("revec--- can't revec loop %i:\n\n", loop_node->id());
