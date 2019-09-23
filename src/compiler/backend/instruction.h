@@ -1344,7 +1344,7 @@ class V8_EXPORT_PRIVATE InstructionBlock final
     : public NON_EXPORTED_BASE(ZoneObject) {
  public:
   InstructionBlock(Zone* zone, RpoNumber rpo_number, RpoNumber loop_header,
-                   RpoNumber loop_end, bool deferred, bool handler, bool convert);
+                   RpoNumber loop_end, bool deferred, bool handler, bool need_convert);
 
   // Instruction indexes (used by the register allocator).
   int first_instruction_index() const {
@@ -1406,8 +1406,7 @@ class V8_EXPORT_PRIVATE InstructionBlock final
   void mark_needs_frame() { needs_frame_ = true; }
 
   bool need_convert() const { return need_convert_; }
-  void mark_need_convert() { need_convert_ = true; }
-
+  void set_need_convert() { need_convert_ = true; }
 
   bool must_construct_frame() const { return must_construct_frame_; }
   void mark_must_construct_frame() { must_construct_frame_ = true; }

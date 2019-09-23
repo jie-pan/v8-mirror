@@ -12,8 +12,8 @@
 #include "src/compiler/zone-stats.h"
 #include "src/globals.h"
 #include "src/zone/zone-containers.h"
-
 #include "src/compiler/machine-graph.h"
+
 namespace v8 {
 namespace internal {
 namespace compiler {
@@ -23,7 +23,6 @@ class CFGBuilder;
 class ControlEquivalence;
 class Graph;
 class SpecialRPONumberer;
-
 class LoopRevectorizer;
 
 // Computes a schedule from a graph, placing nodes into basic blocks and
@@ -36,7 +35,7 @@ class V8_EXPORT_PRIVATE Scheduler {
 
   // The complete scheduling algorithm. Creates a new schedule and places all
   // nodes from the graph into it.
-  static Schedule* ComputeSchedule(Zone* temp_zone, Graph* graph, Flags flags, MachineGraph* mcgraph = NULL, char* function_name = NULL);
+  static Schedule* ComputeSchedule(Zone* temp_zone, Graph* graph, Flags flags, MachineGraph* mcgraph = nullptr, char* function_name = NULL);
 
   // Compute the RPO of blocks in an existing schedule.
   static BasicBlockVector* ComputeSpecialRPO(Zone* zone, Schedule* schedule);

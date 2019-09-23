@@ -724,7 +724,7 @@ DEFINE_BOOL(trace_wasm_code_gc, false, "trace garbage collection of wasm code")
 DEFINE_BOOL(stress_wasm_code_gc, false,
             "stress test garbage collection of wasm code")
 
-DEFINE_BOOL(wasm_revec, true, "wasm loop re-vectorization")
+DEFINE_BOOL(wasm_revec, false, "wasm loop re-vectorization")
 
 // Profiler flags.
 DEFINE_INT(frame_count, 1, "number of stack frames inspected by the profiler")

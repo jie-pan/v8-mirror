@@ -2043,29 +2043,22 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleArchInstruction(
         //__ movdqu(i.OutputSimd128Register(), i.MemoryOperand());
         //__ Movdqu(i.OutputSimd128Register(), i.MemoryOperand());
         //__ movdqa(i.OutputSimd128Register(), i.MemoryOperand());
-
-        if(need_convert)
-        {
+        if(need_convert) {
           __ vmovdqu256(i.OutputSimd128Register(), i.MemoryOperand());
         }
-        else
-        {
+        else {
           __ movdqu(i.OutputSimd128Register(), i.MemoryOperand());
         }
-
       } else {
         size_t index = 0;
         Operand operand = i.MemoryOperand(&index);
         //__ movdqu(operand, i.InputSimd128Register(index));
         //__ Movdqu(operand, i.InputSimd128Register(index));
         //__ movdqa(operand, i.InputSimd128Register(index));
-
-        if(need_convert)
-        {
+        if(need_convert) {
           __ vmovdqu256(operand, i.InputSimd128Register(index));
         }
-        else
-        {
+        else {
           __ movdqu(operand, i.InputSimd128Register(index));
         }
       }
@@ -2346,13 +2339,13 @@ CodeGenerator::CodeGenResult CodeGenerator::AssembleArchInstruction(
     }
     case kX64F32x4Add: {
       DCHECK_EQ(i.OutputSimd128Register(), i.InputSimd128Register(0));
-      if(need_convert)
-      {
+      //__ addps(i.OutputSimd128Register(), i.InputSimd128Register(1));
+      //panjie
+      //__ Addps(i.OutputSimd128Register(), i.InputSimd128Register(1));
+      if(need_convert) {
         __ addps256(i.OutputSimd128Register(), i.InputSimd128Register(1));
       }
-      else
-      {
-
+      else {
         __ addps(i.OutputSimd128Register(), i.InputSimd128Register(1));
       }
       break;

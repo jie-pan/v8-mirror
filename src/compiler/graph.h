@@ -90,7 +90,7 @@ class V8_EXPORT_PRIVATE Graph final : public NON_EXPORTED_BASE(ZoneObject) {
   void Print() const;
 
   bool HasSimd() const { return has_simd_; }
-  void SetSimd(bool flag) { has_simd_ = flag;}
+  void SetSimd(bool has_simd) { has_simd_ = has_simd;}
 
  private:
   friend class NodeMarkerBase;

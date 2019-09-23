@@ -591,7 +591,7 @@ void PhiInstruction::RenameInput(size_t offset, int virtual_register) {
 
 InstructionBlock::InstructionBlock(Zone* zone, RpoNumber rpo_number,
                                    RpoNumber loop_header, RpoNumber loop_end,
-                                   bool deferred, bool handler, bool convert)
+                                   bool deferred, bool handler, bool need_convert)
     : successors_(zone),
       predecessors_(zone),
       phis_(zone),
@@ -601,7 +601,7 @@ InstructionBlock::InstructionBlock(Zone* zone, RpoNumber rpo_number,
       loop_end_(loop_end),
       deferred_(deferred),
       handler_(handler),
-      need_convert_(convert){}
+      need_convert_(need_convert) {}
 
 size_t InstructionBlock::PredecessorIndexOf(RpoNumber rpo_number) const {
   size_t j = 0;

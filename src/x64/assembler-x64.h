@@ -1329,7 +1329,7 @@ class V8_EXPORT_PRIVATE Assembler : public AssemblerBase {
   AVX_3(instr##ps, opcode, vps) \
   AVX_3(instr##pd, opcode, vpd)
 
-// for 256bits avx instruction
+// For 256bits avx instruction
 #define AVX_P_3_256(instr, opcode)  \
   AVX_3(instr##ps##256, opcode, vps256) \
   AVX_3(instr##pd##256, opcode, vpd256)
